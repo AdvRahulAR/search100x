@@ -8,6 +8,20 @@ Aggregates results from DuckDuckGo, Bing, Mojeek, Google News, Bing News, Wikipe
 [![license](https://img.shields.io/npm/l/search100x)](./LICENSE)
 [![install size](https://img.shields.io/bundlephobia/min/search100x)](https://bundlephobia.com/package/search100x)
 
+![](docs/tagline.png)
+
+![](docs/scoring-algorithm.png)
+
+---
+
+## How it compares
+
+![](docs/cost-comparison.png)
+
+![](docs/capability-comparison.png)
+
+![](docs/leads-trails.png)
+
 ---
 
 ## Features
