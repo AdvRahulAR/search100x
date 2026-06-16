@@ -107,3 +107,12 @@ export function blendScores(rrfNorm: number[], bm25Raw: number[]): number[] {
 
   return rrfNorm.map((rrf, i) => BM25_ALPHA * rrf + (1 - BM25_ALPHA) * bm25Norm[i]);
 }
+
+/** Min-max normalise raw BM25 scores to [0, 1]. */
+export function normaliseScores(raw: number[]): number[] {
+  const max   = Math.max(...raw);
+  const min   = Math.min(...raw);
+  const range = max - min;
+  if (range === 0) return raw.map(() => 0.5);
+  return raw.map((s) => (s - min) / range);
+}

@@ -1,5 +1,86 @@
 import { Appearance } from "./types.js";
 
+// ── Authority scoring ─────────────────────────────────────────────────────────
+
+const GOV_EDU = /\.(gov|edu|ac\.[a-z]{2,4})$/;
+const TRUSTED  = /wikipedia\.org|reuters\.com|bbc\.(com|co\.uk)|arxiv\.org|pubmed\.ncbi|nature\.com|science\.org/;
+const ORG      = /\.org$/;
+
+/** Heuristic domain trust score in [0, 1]. Pure URL parsing, zero network cost. */
+export function urlAuthorityScore(url: string): number {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    if (GOV_EDU.test(host))  return 1.00;
+    if (TRUSTED.test(host))  return 0.80;
+    if (ORG.test(host))      return 0.70;
+    return 0.50;
+  } catch {
+    return 0.50;
+  }
+}
+
+// ── Recency scoring ───────────────────────────────────────────────────────────
+
+/**
+ * Exponential decay keyed on publication age.
+ * halfLifeDays=30  → news/general (today=1.0, 30d→0.50, 90d→0.125)
+ * halfLifeDays=365 → legal/academic (content validity spans years)
+ * Returns 0.50 when publishedAt is unknown — neutral, not penalised.
+ */
+export function recencyScore(publishedAt?: Date, halfLifeDays = 30): number {
+  if (!publishedAt) return 0.50;
+  const ageDays = (Date.now() - publishedAt.getTime()) / 86_400_000;
+  return Math.exp((-ageDays * Math.LN2) / halfLifeDays);
+}
+
+// ── Cascade weights ───────────────────────────────────────────────────────────
+
+export interface CascadeWeights {
+  rrf:       number;
+  bm25:      number;
+  authority: number;
+  recency:   number;
+}
+
+/** General web / mixed queries */
+export const DEFAULT_WEIGHTS: CascadeWeights  = { rrf: 0.45, bm25: 0.30, authority: 0.15, recency: 0.10 };
+/** News / current-events queries — freshness dominates */
+export const NEWS_WEIGHTS: CascadeWeights     = { rrf: 0.40, bm25: 0.25, authority: 0.10, recency: 0.25 };
+/** Legal / regulatory — authority and term precision dominate; recency near-zero */
+export const LEGAL_WEIGHTS: CascadeWeights    = { rrf: 0.45, bm25: 0.35, authority: 0.18, recency: 0.02 };
+/** Academic — authority (gov/edu/org) and term match dominate */
+export const ACADEMIC_WEIGHTS: CascadeWeights = { rrf: 0.42, bm25: 0.33, authority: 0.22, recency: 0.03 };
+
+export const SCORING_PRESETS: Record<string, CascadeWeights> = {
+  default:  DEFAULT_WEIGHTS,
+  news:     NEWS_WEIGHTS,
+  legal:    LEGAL_WEIGHTS,
+  academic: ACADEMIC_WEIGHTS,
+};
+
+// ── Cascade blend ─────────────────────────────────────────────────────────────
+
+/**
+ * Four-factor cascade score.
+ * All inputs are already normalised to [0, 1].
+ * weights must sum to 1.0 for the output to remain in [0, 1].
+ */
+export function cascadeScore(
+  rrfNorm:    number,
+  bm25Norm:   number,
+  url:        string,
+  publishedAt?: Date,
+  weights:    CascadeWeights = DEFAULT_WEIGHTS,
+  halfLifeDays = 30
+): number {
+  return (
+    weights.rrf       * rrfNorm +
+    weights.bm25      * bm25Norm +
+    weights.authority * urlAuthorityScore(url) +
+    weights.recency   * recencyScore(publishedAt, halfLifeDays)
+  );
+}
+
 /**
  * Reciprocal Rank Fusion
  * ──────────────────────
@@ -47,6 +128,9 @@ export const ENGINE_WEIGHTS: Record<string, number> = {
   bingnews:   0.75,
   wikipedia:  0.80,
   openalex:   0.70,
+  // SearXNG aggregates ~70 sub-engines; base weight reflects that it's one HTTP
+  // call, but the sub-engine consensus bonus in container.ts boosts confirmed results.
+  searxng:    0.90,
 };
 
 export function engineWeight(name: string): number {

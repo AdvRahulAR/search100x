@@ -1,12 +1,14 @@
 import {
   SearchConfig, SearchOptions, SearchResponse, SearchResult, SourceName,
 } from "./core/types.js";
-import { Engine } from "./core/engine.js";
+import { Engine, ENGINE_TIMEOUTS } from "./core/engine.js";
 import { ResultContainer } from "./core/container.js";
 import { buildQueryBundle, QueryBundle, DOMAIN_PRESETS } from "./core/transformer.js";
 import { IResultCache, ResultCache, cacheKey } from "./core/cache.js";
 import { CircuitBreakerRegistry } from "./core/circuit.js";
 import { enrichSnippets, enrichContents } from "./core/fetcher.js";
+import { SCORING_PRESETS, DEFAULT_WEIGHTS } from "./core/scorer.js";
+import { rerankResults } from "./core/reranker.js";
 
 // Adapters
 import { DuckDuckGoEngine } from "./adapters/duckduckgo.js";
@@ -19,6 +21,7 @@ import { OpenAlexEngine }   from "./adapters/openalex.js";
 import { BraveEngine }      from "./adapters/brave.js";
 import { TavilyEngine }     from "./adapters/tavily.js";
 import { GoogleEngine }     from "./adapters/google.js";
+import { SearXNGEngine }    from "./adapters/searxng.js";
 
 export { DOMAIN_PRESETS }         from "./core/transformer.js";
 export { ResultCache, FileResultCache } from "./core/cache.js";
@@ -107,13 +110,16 @@ export class EnhancedSearch {
 
   async search(query: string, options: SearchOptions = {}): Promise<SearchResponse> {
     const {
-      limit      = DEFAULT_LIMIT,
+      limit            = DEFAULT_LIMIT,
       scopedDomains,
       timeRange,
-      page       = 1,
-      enrichTopN     = 0,
-      enrichContent  = 0,
-      noCache        = false,
+      page             = 1,
+      enrichTopN       = 0,
+      enrichContent    = 0,
+      noCache          = false,
+      scoringPreset    = "default",
+      rerank           = false,
+      rerankCandidates = 20,
     } = options;
 
     const totalTimeout = this.config.timeoutMs ?? DEFAULT_TIMEOUT;
@@ -122,12 +128,15 @@ export class EnhancedSearch {
     const srcKeys      = entries.map((e) => `${e.engine.name}:${e.variant}`);
 
     if (!noCache) {
-      const key    = cacheKey(query + (timeRange ?? "") + page, srcKeys);
+      const key    = cacheKey(query + (timeRange ?? "") + page + scoringPreset, srcKeys);
       const cached = this.cache.get(key);
       if (cached) return this.toResponse(query, cached.slice(0, limit), Date.now() - (deadline - totalTimeout));
     }
 
     const bundle    = buildQueryBundle(query, scopedDomains, timeRange, page);
+    const weights   = SCORING_PRESETS[scoringPreset] ?? DEFAULT_WEIGHTS;
+    // Legal content stays valid for years; news decays in days
+    const halfLife  = scoringPreset === "legal" || scoringPreset === "academic" ? 365 : 30;
     const container = new ResultContainer(query);
 
     await Promise.all(
@@ -136,8 +145,10 @@ export class EnhancedSearch {
           console.warn(`[circuit] skipping ${engine.name} (OPEN)`);
           return;
         }
-        const remaining = Math.max(1_000, deadline - Date.now());
-        const result    = await withDeadline(
+        // Per-engine adaptive timeout — fast engines cut sooner, SearXNG gets more time
+        const engineTimeout = ENGINE_TIMEOUTS[engine.name] ?? totalTimeout;
+        const remaining     = Math.max(1_000, Math.min(engineTimeout, deadline - Date.now()));
+        const result        = await withDeadline(
           engine.search(bundle[variant], remaining, bundle.timeRange, bundle.page),
           remaining,
           engine.name
@@ -151,7 +162,9 @@ export class EnhancedSearch {
       })
     );
 
-    let results = container.getResults(limit);
+    // Fetch more candidates than limit when reranking so CE has enough to work with
+    const fetchLimit = rerank ? Math.max(limit, rerankCandidates) : limit;
+    let results = container.getResults(fetchLimit, weights, halfLife);
 
     if (enrichTopN > 0 && results.length > 0) {
       results = await enrichSnippets(results, enrichTopN, Math.min(totalTimeout, 5_000), query);
@@ -161,8 +174,15 @@ export class EnhancedSearch {
       results = await enrichContents(results, enrichContent, Math.min(totalTimeout, 8_000), query);
     }
 
+    // Cross-encoder re-ranking (opt-in — requires onnxruntime-node + model)
+    if (rerank && results.length > 0) {
+      results = await rerankResults(query, results, rerankCandidates);
+    }
+
+    results = results.slice(0, limit);
+
     if (!noCache) {
-      const key = cacheKey(query + (timeRange ?? "") + page, srcKeys);
+      const key = cacheKey(query + (timeRange ?? "") + page + scoringPreset, srcKeys);
       this.cache.set(key, results);
     }
 
@@ -243,9 +263,10 @@ export class EnhancedSearch {
     m.set("wikipedia",  new WikipediaEngine());
     m.set("openalex",   new OpenAlexEngine());
 
-    if (tavilyApiKey)           m.set("tavily", new TavilyEngine(tavilyApiKey));
-    if (braveApiKey)            m.set("brave",  new BraveEngine(braveApiKey));
-    if (googleApiKey && googleCx) m.set("google", new GoogleEngine(googleApiKey, googleCx));
+    if (tavilyApiKey)              m.set("tavily",  new TavilyEngine(tavilyApiKey));
+    if (braveApiKey)               m.set("brave",   new BraveEngine(braveApiKey));
+    if (googleApiKey && googleCx)  m.set("google",  new GoogleEngine(googleApiKey, googleCx));
+    if (this.config.searxng)       m.set("searxng", new SearXNGEngine(this.config.searxng));
 
     return m;
   }
@@ -263,6 +284,7 @@ export class EnhancedSearch {
       tavily:     "primary",
       brave:      "scoped",
       google:     "primary",
+      searxng:    "primary",
     };
 
     const base: EngineEntry[] = requested

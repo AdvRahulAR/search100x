@@ -1,134 +1,117 @@
 import { RawResult, Appearance, MergedResult, SearchResult, SourceName } from "./types.js";
 import { normalizeUrl, urlKey } from "./normalizer.js";
-import { engineWeight, rrfScore, normaliseScores } from "./scorer.js";
-import { bm25Scores, blendScores } from "./bm25.js";
-
-/**
- * ResultContainer
- * ───────────────
- * Mirrors SearXNG's ResultContainer (results.py) but implemented as a
- * single-pass merge + RRF score computation.
- *
- * Algorithm:
- *  1. For each engine result list (in parallel):
- *       - Normalise the URL → compute hash key
- *       - If key seen: merge (update snippet/title, append appearance)
- *       - If key new:  insert new record
- *  2. After all engines are collected:
- *       - Compute RRF score for every record
- *       - Min-max normalise into [0,1]
- *       - Sort descending by score
- *       - Return top-N
- *
- * Merge rules (from SearXNG's merge_two_main_results):
- *  - title:   keep the one from the higher-weight engine
- *  - snippet: keep the longer of the two
- *  - url:     keep the canonical (first normalised form seen)
- */
+import { engineWeight, rrfScore, normaliseScores, cascadeScore, CascadeWeights, DEFAULT_WEIGHTS } from "./scorer.js";
+import { bm25Scores, normaliseScores as normaliseBm25 } from "./bm25.js";
 
 interface Record {
-  title: string;
-  url: string;             // original URL of the first engine that found it
-  snippet: string;
-  titleEngineWeight: number; // weight of the engine that owns the current title
-  appearances: Appearance[];
+  title:             string;
+  url:               string;
+  snippet:           string;
+  titleEngineWeight: number;
+  appearances:       Appearance[];
+  publishedAt?:      Date;
+  subEngines:        string[];   // union of sub-engine names across all SearXNG appearances
 }
 
 export class ResultContainer {
-  private map = new Map<number, Record>();
+  private map   = new Map<number, Record>();
   private query: string;
 
   constructor(query = "") {
     this.query = query;
   }
 
-  /**
-   * Ingest results from one engine.
-   *
-   * @param engineName  Source identifier
-   * @param results     Ranked list (index 0 = rank 1)
-   */
   add(engineName: string, results: RawResult[]): void {
     const weight = engineWeight(engineName);
 
     results.forEach((raw, index) => {
       if (!raw.url || !raw.title) return;
 
-      const rank = index + 1; // 1-indexed
-      const norm = normalizeUrl(raw.url);
-      const key = urlKey(norm);
+      const rank       = index + 1;
+      const norm       = normalizeUrl(raw.url);
+      const key        = urlKey(norm);
       const appearance: Appearance = { engine: engineName, weight, rank };
 
       const existing = this.map.get(key);
       if (!existing) {
         this.map.set(key, {
-          title: raw.title,
-          url: raw.url,
-          snippet: raw.snippet,
+          title:             raw.title,
+          url:               raw.url,
+          snippet:           raw.snippet,
           titleEngineWeight: weight,
-          appearances: [appearance],
+          appearances:       [appearance],
+          publishedAt:       raw.publishedAt,
+          subEngines:        raw.subEngines ?? [],
         });
         return;
       }
 
-      // Merge — deduplicate appearances so the same (engine, rank) pair from
-      // parallel primary+scoped variants doesn't double-count in RRF scoring.
+      // Deduplicate appearances — same (engine, rank) from parallel scoped variants
       const isDuplicate = existing.appearances.some(
         (a) => a.engine === engineName && a.rank === rank
       );
       if (!isDuplicate) existing.appearances.push(appearance);
 
-      // Title: prefer higher-weight engine's title
+      // Accumulate SearXNG sub-engine names for consensus weighting
+      if (raw.subEngines) {
+        for (const se of raw.subEngines) {
+          if (!existing.subEngines.includes(se)) existing.subEngines.push(se);
+        }
+      }
+
+      // Title: prefer higher-weight engine
       if (weight > existing.titleEngineWeight) {
-        existing.title = raw.title;
+        existing.title             = raw.title;
         existing.titleEngineWeight = weight;
       }
 
-      // Snippet: prefer longer (more informative)
+      // Snippet: prefer longer
       if (raw.snippet.length > existing.snippet.length) {
         existing.snippet = raw.snippet;
+      }
+
+      // publishedAt: keep the earliest known date (first publication)
+      if (raw.publishedAt && (!existing.publishedAt || raw.publishedAt < existing.publishedAt)) {
+        existing.publishedAt = raw.publishedAt;
       }
     });
   }
 
-  /**
-   * Finalise: compute scores, normalise, sort, return top-limit results.
-   */
-  getResults(limit: number): SearchResult[] {
+  getResults(limit: number, weights: CascadeWeights = DEFAULT_WEIGHTS, halfLifeDays = 30): SearchResult[] {
     const records = [...this.map.values()];
     if (records.length === 0) return [];
 
-    // Compute raw RRF scores with cross-engine consensus bonus.
-    // Results seen by N engines get a gentle multiplier: ×(1 + 0.08*(N-1))
-    // This rewards consensus without overwhelming single-engine quality signal.
-    const rawScores  = records.map((r) => {
-      const base  = rrfScore(r.appearances);
-      // Logarithmic consensus bonus: 2 engines → ×1.10, 4 engines → ×1.17, 8 → ×1.24
-      // Logarithm gives diminishing returns — the 4th agreeing engine matters less than the 2nd.
-      const bonus = 1 + 0.15 * Math.log(r.appearances.length);
-      return base * bonus;
+    // ── RRF with logarithmic consensus bonus ──────────────────────────────────
+    // SearXNG sub-engine count provides an additional signal: a result confirmed
+    // by 5 Google/Bing/Brave/DDG sub-engines inside SearXNG is more trustworthy
+    // than one that only one sub-engine returned.
+    const rawRrf = records.map((r) => {
+      const base         = rrfScore(r.appearances);
+      const engineBonus  = 1 + 0.15 * Math.log(r.appearances.length);
+      const subEngCount  = Math.max(1, r.subEngines.length);
+      const subEngBonus  = subEngCount > 1 ? 1 + 0.12 * Math.log(subEngCount) : 1;
+      return base * engineBonus * subEngBonus;
     });
-    const rrfNorm    = normaliseScores(rawScores);
+    const rrfNorm = normaliseScores(rawRrf);
 
-    // BM25 relevance blend: re-weight by query ↔ title+snippet similarity
-    // This suppresses off-topic results that ranked well on a single engine
-    const docs       = records.map((r) => `${r.title} ${r.snippet}`);
-    const bm25Raw    = bm25Scores(this.query, docs);
-    const normScores = this.query ? blendScores(rrfNorm, bm25Raw) : rrfNorm;
+    // ── BM25 term relevance ───────────────────────────────────────────────────
+    const docs    = records.map((r) => `${r.title} ${r.snippet}`);
+    const bm25Raw = bm25Scores(this.query, docs);
+    const bm25Norm = this.query ? normaliseBm25(bm25Raw) : bm25Raw.map(() => 0.5);
 
-    // Build SearchResult array
+    // ── Cascade score ─────────────────────────────────────────────────────────
     const results: SearchResult[] = records.map((r, i) => ({
-      title: r.title,
-      url: r.url,
-      snippet: r.snippet,
-      score: normScores[i],
-      sources: r.appearances.map((a) => a.engine) as SourceName[],
+      title:       r.title,
+      url:         r.url,
+      snippet:     r.snippet,
+      score:       cascadeScore(rrfNorm[i], bm25Norm[i], r.url, r.publishedAt, weights, halfLifeDays),
+      sources:     r.appearances.map((a) => a.engine) as SourceName[],
+      publishedAt: r.publishedAt,
     }));
 
-    // Sort descending by score, then by number of sources (tie-break)
     results.sort((a, b) => {
-      const scoreDiff = b.score - a.score;
-      if (Math.abs(scoreDiff) > 1e-9) return scoreDiff;
+      const d = b.score - a.score;
+      if (Math.abs(d) > 1e-9) return d;
       return b.sources.length - a.sources.length;
     });
 

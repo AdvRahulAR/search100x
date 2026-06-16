@@ -13,9 +13,14 @@ export type {
   TimeRange,
   ResultType,
 } from "./core/types.js";
-export { ENGINE_WEIGHTS, K, rrfScore, normaliseScores } from "./core/scorer.js";
+export { ENGINE_WEIGHTS, K, rrfScore, normaliseScores, urlAuthorityScore, recencyScore, cascadeScore, DEFAULT_WEIGHTS, NEWS_WEIGHTS, LEGAL_WEIGHTS, ACADEMIC_WEIGHTS, SCORING_PRESETS } from "./core/scorer.js";
+export type { CascadeWeights } from "./core/scorer.js";
 export { normalizeUrl, urlKey } from "./core/normalizer.js";
-export { bm25Scores, blendScores, BM25_ALPHA } from "./core/bm25.js";
+export { bm25Scores, blendScores, BM25_ALPHA, normaliseScores as normaliseBm25Scores } from "./core/bm25.js";
+export { SearXNGEngine } from "./adapters/searxng.js";
+export type { SearXNGConfig } from "./core/types.js";
+export { rerankResults } from "./core/reranker.js";
+export { ENGINE_TIMEOUTS } from "./core/engine.js";
 export { fetchPageContent, fetchBestPassage, enrichSnippets, fetchRelevantContent, enrichContents } from "./core/fetcher.js";
 export { toDocuments, buildCitedQuery } from "./core/documents.js";
 export type { CitationDocument, ToDocumentsOptions } from "./core/documents.js";
