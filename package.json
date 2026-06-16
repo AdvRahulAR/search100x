@@ -51,11 +51,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dharmabot/search100x.git"
+    "url": "git+https://github.com/AdvRahulAR/search100x.git"
   },
-  "homepage": "https://github.com/dharmabot/search100x#readme",
+  "homepage": "https://github.com/AdvRahulAR/search100x#readme",
   "bugs": {
-    "url": "https://github.com/dharmabot/search100x/issues"
+    "url": "https://github.com/AdvRahulAR/search100x/issues"
   },
   "dependencies": {
     "node-html-parser": "^6.1.0"
