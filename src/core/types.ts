@@ -11,6 +11,7 @@ export interface RawResult {
   subEngines?: string[];
   /** Publication date — populated by news adapters and SearXNG */
   publishedAt?: Date;
+  providerScore?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -22,6 +23,7 @@ export interface Appearance {
   engine: string;
   weight: number;
   rank: number;
+  providerScore?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -51,7 +53,10 @@ export type SourceName =
   | "brave"
   | "tavily"
   | "google"
-  | "searxng";
+  | "searxng"
+  | "marginalia"
+  | "yep"
+  | "openmeteo";
 
 /** Coarse category of a search result — set by the engine that found it. */
 export type ResultType = "web" | "news" | "academic" | "encyclopedia";
@@ -160,6 +165,8 @@ export interface SearchOptions {
   rerank?: boolean;
   /** Number of candidates passed to the cross-encoder (default: 20) */
   rerankCandidates?: number;
+  /** Enable multi-variant query fan-out for higher recall (default: false) */
+  reformulate?: boolean;
 }
 
 export interface SearchResponse {

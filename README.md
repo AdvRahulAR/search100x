@@ -2,7 +2,7 @@
 
 **Multi-source web search for LLM grounding — works with any model provider.**
 
-Aggregates results from DuckDuckGo, Bing, Mojeek, Google News, Bing News, Wikipedia, Brave, Tavily, and Google Search into a single ranked list using RRF + BM25 scoring. Extracts relevant page passages and formats them for any LLM's context window.
+Aggregates results from DuckDuckGo, Bing, Mojeek, Google News, Bing News, Wikipedia, Brave, Tavily, Google Search, Marginalia, and Yep into a single ranked list using RRF + BM25 scoring. Extracts relevant page passages and formats them for any LLM's context window.
 
 [![npm version](https://img.shields.io/npm/v/search100x)](https://www.npmjs.com/package/search100x)
 [![license](https://img.shields.io/npm/l/search100x)](./LICENSE)
@@ -26,7 +26,7 @@ Aggregates results from DuckDuckGo, Bing, Mojeek, Google News, Bing News, Wikipe
 
 ## Features
 
-- **10 search engines in parallel** — free engines (no key needed) + optional premium APIs
+- **12 search engines in parallel** — free engines (no key needed) + optional premium APIs
 - **SearXNG integration** — connect your own SearXNG instance to add ~70 sub-engines in a single call
 - **4-factor cascade scoring** — RRF × authority × BM25 × recency, with presets for `news`, `legal`, and `academic`
 - **Cross-engine + sub-engine consensus** — results confirmed by multiple engines (and SearXNG sub-engines) are boosted logarithmically
@@ -716,9 +716,15 @@ tavily / google = 1.0
 googlenews      = 0.85
 duckduckgo      = 0.80
 bing            = 0.75
-mojeek          = 0.65
+yep             = 0.70
 wikipedia       = 0.70
+mojeek          = 0.65
+marginalia      = 0.62
 ```
+
+5. **Clustering & Reputation Filter**:
+   - **Domain Reputation Filter**: Matches domains against boost lists (authoritative sources) and checks titles and snippets for low-quality/spam regex patterns (deals, affiliate links, clickbait) to scale the authority score component.
+   - **Result Clustering**: Groups results into subtopic clusters based on title Jaccard token similarity and selects the highest-scoring representative from each cluster first to ensure query coverage and diversity.
 
 ---
 

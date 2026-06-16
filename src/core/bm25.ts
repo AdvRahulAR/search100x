@@ -34,12 +34,34 @@ const STOPWORDS = new Set([
   "whether","further","under","over","per","via","re","vs",
 ]);
 
-function tokenize(text: string): string[] {
+export function tokenize(text: string): string[] {
   return text
     .toLowerCase()
     .replace(/[^\w\s]/g, " ")
     .split(/\s+/)
     .filter((t) => t.length > 1 && !STOPWORDS.has(t));
+}
+
+export function snippetRelevanceScore(snippet: string, queryTokens: string[]): number {
+  if (queryTokens.length === 0) return 0.5;
+  const snippetTokens = snippet.toLowerCase().split(/\s+/);
+  const tf = new Map<string, number>();
+  for (const t of snippetTokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+
+  let score = 0;
+  const N = snippetTokens.length;
+  const avgLen = 40; // typical snippet length in words
+
+  for (const qt of queryTokens) {
+    const f = tf.get(qt) ?? 0;
+    if (f === 0) continue;
+    // BM25+ with passage params: k1=1.2, b=0.3, δ=0.5
+    const k1 = 1.2, b = 0.3, δ = 0.5;
+    const K = k1 * (1 - b + b * N / avgLen);
+    score += (f * (k1 + 1)) / (f + K) + δ;
+  }
+
+  return Math.min(1, score / queryTokens.length);  // norm to [0,1]
 }
 
 function termFreq(tokens: string[]): Map<string, number> {

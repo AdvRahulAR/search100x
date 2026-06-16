@@ -9,6 +9,8 @@ import { CircuitBreakerRegistry } from "./core/circuit.js";
 import { enrichSnippets, enrichContents } from "./core/fetcher.js";
 import { SCORING_PRESETS, DEFAULT_WEIGHTS } from "./core/scorer.js";
 import { rerankResults } from "./core/reranker.js";
+import { classifyQuery, detectLiveIntent } from "./core/classifier.js";
+import { reformulateQuery } from "./core/reformulator.js";
 
 // Adapters
 import { DuckDuckGoEngine } from "./adapters/duckduckgo.js";
@@ -22,6 +24,9 @@ import { BraveEngine }      from "./adapters/brave.js";
 import { TavilyEngine }     from "./adapters/tavily.js";
 import { GoogleEngine }     from "./adapters/google.js";
 import { SearXNGEngine }    from "./adapters/searxng.js";
+import { MarginaliaEngine } from "./adapters/marginalia.js";
+import { YepEngine }        from "./adapters/yep.js";
+import { OpenMeteoEngine }  from "./adapters/openmeteo.js";
 
 export { DOMAIN_PRESETS }         from "./core/transformer.js";
 export { ResultCache, FileResultCache } from "./core/cache.js";
@@ -117,10 +122,16 @@ export class EnhancedSearch {
       enrichTopN       = 0,
       enrichContent    = 0,
       noCache          = false,
-      scoringPreset    = "default",
+      scoringPreset,
       rerank           = false,
       rerankCandidates = 20,
     } = options;
+
+    const autoClass  = classifyQuery(query);
+    const preset     = scoringPreset
+      ?? (autoClass.confidence > 0.65 ? autoClass.category : "default");
+
+    const resolvedTimeRange = timeRange ?? (preset === "news" ? "week" : undefined);
 
     const totalTimeout = this.config.timeoutMs ?? DEFAULT_TIMEOUT;
     const deadline     = Date.now() + totalTimeout;
@@ -128,24 +139,61 @@ export class EnhancedSearch {
     const srcKeys      = entries.map((e) => `${e.engine.name}:${e.variant}`);
 
     if (!noCache) {
-      const key    = cacheKey(query + (timeRange ?? "") + page + scoringPreset, srcKeys);
-      const cached = this.cache.get(key);
+      const key    = cacheKey(query + (resolvedTimeRange ?? "") + page + preset, srcKeys);
+      const cached = this.cache.get(key, query, srcKeys);
       if (cached) return this.toResponse(query, cached.slice(0, limit), Date.now() - (deadline - totalTimeout));
     }
 
-    const bundle    = buildQueryBundle(query, scopedDomains, timeRange, page);
-    const weights   = SCORING_PRESETS[scoringPreset] ?? DEFAULT_WEIGHTS;
-    // Legal content stays valid for years; news decays in days
-    const halfLife  = scoringPreset === "legal" || scoringPreset === "academic" ? 365 : 30;
+    const bundle    = buildQueryBundle(query, scopedDomains, resolvedTimeRange, page);
+    const weights   = SCORING_PRESETS[preset] ?? DEFAULT_WEIGHTS;
+    // Legal/academic content stays valid for years; news decays in a few days (3 days); general default is 30 days
+    const halfLife  = preset === "legal" || preset === "academic" ? 365 : (preset === "news" ? 3 : 30);
     const container = new ResultContainer(query);
 
-    await Promise.all(
-      entries.map(async ({ engine, variant }) => {
+    // Live-data intent: detect weather/stocks/time queries and restrict engines
+    // to real-data sources + news only. Avoids Wikipedia/web-scraper noise.
+    const liveIntent = detectLiveIntent(query);
+    let activeEntries = entries;
+
+    const tasks: Promise<void>[] = [];
+
+    // pinnedResult: real-data result that always appears at rank 1 regardless of scoring
+    let pinnedResult: SearchResult | null = null;
+
+    if (liveIntent === "weather") {
+      // Run OpenMeteo FIRST with a dedicated full budget — it makes two sequential
+      // HTTP calls (geocode → weather) so it needs time before other engines consume the deadline.
+      const weatherEngine = new OpenMeteoEngine();
+      const weatherTimeout = ENGINE_TIMEOUTS["openmeteo"] ?? 6_000;
+      const weatherResult = await withDeadline(
+        weatherEngine.search(query, weatherTimeout),
+        weatherTimeout,
+        "openmeteo"
+      );
+      if (weatherResult !== null && weatherResult.length > 0) {
+        // Pin this result to rank 1 — real-time data always wins over indexed pages
+        pinnedResult = {
+          title:       weatherResult[0].title,
+          url:         weatherResult[0].url,
+          snippet:     weatherResult[0].snippet,
+          score:       1.0,
+          sources:     ["openmeteo"],
+          publishedAt: weatherResult[0].publishedAt,
+        };
+      }
+      // Restrict remaining engines to news only — suppress web scrapers and Wikipedia
+      activeEntries = entries.filter(e =>
+        (["googlenews", "bingnews", "tavily", "brave", "google"] as string[]).includes(e.engine.name)
+      );
+    }
+
+    // Main query tasks
+    activeEntries.forEach(({ engine, variant }) => {
+      tasks.push((async () => {
         if (this.circuit.isOpen(engine.name)) {
           console.warn(`[circuit] skipping ${engine.name} (OPEN)`);
           return;
         }
-        // Per-engine adaptive timeout — fast engines cut sooner, SearXNG gets more time
         const engineTimeout = ENGINE_TIMEOUTS[engine.name] ?? totalTimeout;
         const remaining     = Math.max(1_000, Math.min(engineTimeout, deadline - Date.now()));
         const result        = await withDeadline(
@@ -159,12 +207,52 @@ export class EnhancedSearch {
           container.add(engine.name, result);
           this.circuit.recordSuccess(engine.name);
         }
-      })
-    );
+      })());
+    });
+
+    // Multi-variant query fan-out tasks
+    const shouldReformulate = options.reformulate ?? false;
+    const extraQueries = shouldReformulate ? reformulateQuery(query).slice(1) : [];
+
+    extraQueries.forEach((eq) => {
+      const eqBundle = buildQueryBundle(eq, scopedDomains, resolvedTimeRange, page);
+      const freeWebEngines = ["duckduckgo", "bing", "mojeek"];
+      const activeFreeEntries = entries.filter(e => freeWebEngines.includes(e.engine.name));
+
+      activeFreeEntries.forEach(({ engine, variant }) => {
+        tasks.push((async () => {
+          if (this.circuit.isOpen(engine.name)) return;
+          const engineTimeout = ENGINE_TIMEOUTS[engine.name] ?? totalTimeout;
+          const remaining     = Math.max(1_000, Math.min(engineTimeout, deadline - Date.now()));
+          const result        = await withDeadline(
+            engine.search(eqBundle[variant], remaining, eqBundle.timeRange, eqBundle.page),
+            remaining,
+            `${engine.name}:${eq}`
+          );
+          if (result === null) {
+            this.circuit.recordFailure(engine.name);
+          } else {
+            const sizeBefore = container.size;
+            container.add(engine.name, result);
+            const sizeAfter = container.size;
+            const added = sizeAfter - sizeBefore;
+            console.log(`[reformulator] query "${eq}" on ${engine.name} added ${added} unique results.`);
+            this.circuit.recordSuccess(engine.name);
+          }
+        })());
+      });
+    });
+
+    await Promise.all(tasks);
 
     // Fetch more candidates than limit when reranking so CE has enough to work with
     const fetchLimit = rerank ? Math.max(limit, rerankCandidates) : limit;
     let results = container.getResults(fetchLimit, weights, halfLife);
+
+    // Prepend pinned live-data result (e.g. OpenMeteo) — real-time data always leads
+    if (pinnedResult) {
+      results = [pinnedResult, ...results.filter(r => r.url !== pinnedResult!.url)];
+    }
 
     if (enrichTopN > 0 && results.length > 0) {
       results = await enrichSnippets(results, enrichTopN, Math.min(totalTimeout, 5_000), query);
@@ -182,8 +270,8 @@ export class EnhancedSearch {
     results = results.slice(0, limit);
 
     if (!noCache) {
-      const key = cacheKey(query + (timeRange ?? "") + page + scoringPreset, srcKeys);
-      this.cache.set(key, results);
+      const key = cacheKey(query + (resolvedTimeRange ?? "") + page + preset, srcKeys);
+      this.cache.set(key, results, query, srcKeys);
     }
 
     return this.toResponse(query, results, Date.now() - (deadline - totalTimeout));
@@ -262,11 +350,15 @@ export class EnhancedSearch {
     m.set("bingnews",   new BingNewsEngine(newsRegion));
     m.set("wikipedia",  new WikipediaEngine());
     m.set("openalex",   new OpenAlexEngine());
+    m.set("marginalia", new MarginaliaEngine());
+    m.set("yep",        new YepEngine());
 
-    if (tavilyApiKey)              m.set("tavily",  new TavilyEngine(tavilyApiKey));
-    if (braveApiKey)               m.set("brave",   new BraveEngine(braveApiKey));
-    if (googleApiKey && googleCx)  m.set("google",  new GoogleEngine(googleApiKey, googleCx));
-    if (this.config.searxng)       m.set("searxng", new SearXNGEngine(this.config.searxng));
+    if (tavilyApiKey)              m.set("tavily",    new TavilyEngine(tavilyApiKey));
+    if (braveApiKey)               m.set("brave",     new BraveEngine(braveApiKey));
+    if (googleApiKey && googleCx)  m.set("google",    new GoogleEngine(googleApiKey, googleCx));
+    if (this.config.searxng)       m.set("searxng",   new SearXNGEngine(this.config.searxng));
+    // openmeteo is instantiated on-demand inside search() for weather queries only
+    // — not registered here so it doesn't run on every non-weather query
 
     return m;
   }
@@ -285,6 +377,9 @@ export class EnhancedSearch {
       brave:      "scoped",
       google:     "primary",
       searxng:    "primary",
+      marginalia: "primary",
+      yep:        "primary",
+      openmeteo:  "primary",
     };
 
     const base: EngineEntry[] = requested

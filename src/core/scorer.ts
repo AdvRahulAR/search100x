@@ -1,4 +1,5 @@
 import { Appearance } from "./types.js";
+import { domainReputation, spamSignalScore } from "./reputation.js";
 
 // ── Authority scoring ─────────────────────────────────────────────────────────
 
@@ -10,10 +11,11 @@ const ORG      = /\.org$/;
 export function urlAuthorityScore(url: string): number {
   try {
     const host = new URL(url).hostname.replace(/^www\./, "");
-    if (GOV_EDU.test(host))  return 1.00;
-    if (TRUSTED.test(host))  return 0.80;
-    if (ORG.test(host))      return 0.70;
-    return 0.50;
+    let tldScore = 0.50;
+    if (GOV_EDU.test(host))  tldScore = 1.00;
+    else if (TRUSTED.test(host))  tldScore = 0.80;
+    else if (ORG.test(host))      tldScore = 0.70;
+    return Math.min(1.0, tldScore * domainReputation(url));
   } catch {
     return 0.50;
   }
@@ -71,12 +73,15 @@ export function cascadeScore(
   url:        string,
   publishedAt?: Date,
   weights:    CascadeWeights = DEFAULT_WEIGHTS,
-  halfLifeDays = 30
+  halfLifeDays = 30,
+  title = "",
+  snippet = ""
 ): number {
+  const spamMultiplier = spamSignalScore(title, snippet);
   return (
     weights.rrf       * rrfNorm +
     weights.bm25      * bm25Norm +
-    weights.authority * urlAuthorityScore(url) +
+    weights.authority * urlAuthorityScore(url) * spamMultiplier +
     weights.recency   * recencyScore(publishedAt, halfLifeDays)
   );
 }
@@ -107,11 +112,26 @@ export function cascadeScore(
  *  - Changing k shifts the balance between rank-1 dominance and multi-engine consensus
  */
 
-// k=10 calibrated for our corpus size (60–100 results across 6–10 engines).
-// The original k=60 was designed for TREC corpora of 1000+ documents — it
-// flattens rank differences at small N, making rank-1 and rank-5 nearly
-// indistinguishable. At k=10, rank-1 vs rank-5 separation is 3× wider.
 export const K = 10;
+
+const PROVIDER_ALPHA: Record<string, number> = {
+  tavily: 0.30,   // trust Tavily scores moderately
+  brave:  0.20,   // trust Brave scores less
+  google: 0.25,
+  searxng: 0.00,  // SearXNG doesn't have reliable scores
+};
+
+export function adjustedRank(rank: number, providerScore?: number, engine?: string): number {
+  if (!engine) return rank;
+  const α = PROVIDER_ALPHA[engine] ?? 0;
+  if (!providerScore || α === 0) return rank;
+  const s = Math.max(0, Math.min(1, providerScore));
+  return rank * (1 - α * s);
+}
+
+export function adaptiveK(totalResults: number): number {
+  return Math.min(150, Math.max(10, Math.floor(0.29 * totalResults)));
+}
 
 /** Engine trust weights — must sum to ≤ N (they don't need to sum to 1) */
 export const ENGINE_WEIGHTS: Record<string, number> = {
@@ -123,6 +143,8 @@ export const ENGINE_WEIGHTS: Record<string, number> = {
   duckduckgo: 0.80,
   bing:       0.75,
   mojeek:     0.65,
+  marginalia: 0.62,
+  yep:        0.70,
   // Structured/RSS (authoritative but narrow coverage)
   googlenews: 0.85,
   bingnews:   0.75,
@@ -131,6 +153,8 @@ export const ENGINE_WEIGHTS: Record<string, number> = {
   // SearXNG aggregates ~70 sub-engines; base weight reflects that it's one HTTP
   // call, but the sub-engine consensus bonus in container.ts boosts confirmed results.
   searxng:    0.90,
+  // Live-data adapters: always rank first when present — real data > indexed pages
+  openmeteo:  1.00,
 };
 
 export function engineWeight(name: string): number {
@@ -143,24 +167,25 @@ export function engineWeight(name: string): number {
  * @param appearances  List of (engine, weight, rank) tuples
  * @returns            RRF score ∈ (0, ∞)  — higher is better
  */
-export function rrfScore(appearances: Appearance[]): number {
+export function rrfScore(appearances: Appearance[], rrfK = K): number {
   return appearances.reduce(
-    (sum, { weight, rank }) => sum + weight / (K + rank),
+    (sum, a) => sum + a.weight / (rrfK + adjustedRank(a.rank, a.providerScore, a.engine)),
     0
   );
 }
 
+const SIGMOID_MU   = 0.12;  // tune: median RRF score of a "good" result
+const SIGMOID_BETA = 0.04;  // tune: tighter = more separation at top
+
 /**
  * Normalise a list of RRF scores into [0, 1].
- * Uses min-max normalisation across the result set.
- * If all scores are equal (edge case), returns 0.5 for all.
+ * Uses shifted sigmoid normalisation scaled by engine count.
  */
 export function normaliseScores(
-  scores: number[]
+  scores: number[],
+  engineCount = 3
 ): number[] {
-  const max = Math.max(...scores);
-  const min = Math.min(...scores);
-  const range = max - min;
-  if (range === 0) return scores.map(() => 0.5);
-  return scores.map((s) => (s - min) / range);
+  const mu   = SIGMOID_MU * (engineCount / 3);
+  const beta = SIGMOID_BETA;
+  return scores.map(x => 1 / (1 + Math.exp(-(x - mu) / beta)));
 }
