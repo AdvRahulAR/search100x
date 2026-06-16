@@ -677,4 +677,4 @@ npm test        # build + run all tests (hits live network)
 
 ## License
 
-MIT © 2026 [Rahul - Dharmabot AI](https://github.com/dharmabot)
+MIT © 2026 [Rahul - Dharmabot AI](https://dharmabot.ai)
