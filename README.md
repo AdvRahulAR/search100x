@@ -26,10 +26,13 @@ Aggregates results from DuckDuckGo, Bing, Mojeek, Google News, Bing News, Wikipe
 
 ## Features
 
-- **8 search engines in parallel** — free engines (no key needed) + optional premium APIs
-- **RRF + BM25 scoring** — cross-engine consensus ranking with passage-level relevance filtering
+- **10 search engines in parallel** — free engines (no key needed) + optional premium APIs
+- **SearXNG integration** — connect your own SearXNG instance to add ~70 sub-engines in a single call
+- **4-factor cascade scoring** — RRF × authority × BM25 × recency, with presets for `news`, `legal`, and `academic`
+- **Cross-engine + sub-engine consensus** — results confirmed by multiple engines (and SearXNG sub-engines) are boosted logarithmically
 - **Content extraction** — fetches actual page text, splits into 200-word windows, returns highest-scoring passages relevant to the query
-- **Citations-ready output** — `toDocuments()` formats results as structured documents with source URLs for cited answer generation (works with Anthropic, Cohere, and any LLM that accepts document arrays)
+- **Cross-encoder re-ranking** — optional `rerank: true` uses ms-marco-MiniLM-L-6-v2 via ONNX for semantic reranking (no Python needed)
+- **Citations-ready output** — `toDocuments()` formats results as structured documents with source URLs (works with Anthropic, OpenAI, Gemini, Sarvam, any LLM)
 - **Domain presets** — `india-legal`, `us-legal`, `uk-legal`, `eu-legal`, `academic`, and more
 - **Streaming** — `searchStream()` async generator yields results as each engine completes
 - **Plugin API** — register custom engines, disable built-ins, inspect circuit breaker state
@@ -494,6 +497,55 @@ for await (const chunk of result.textStream) {
 
 ---
 
+## SearXNG integration
+
+Connect your own SearXNG instance to route queries through ~70 additional sub-engines (Google, Bing, Brave, DuckDuckGo, Startpage, Qwant, Yahoo, and more) in a single parallel call. Results from SearXNG are merged with native engines using the same RRF + cascade scoring — sub-engines that agree on a result amplify its consensus bonus.
+
+```typescript
+import { EnhancedSearch } from "search100x";
+
+const s = new EnhancedSearch({
+  searxng: {
+    baseUrl: "https://search100x.replit.app",
+    token:   process.env.SEARXNG_TOKEN,      // if your instance requires auth
+    engines: "google,bing,brave,ddg",         // optional: restrict sub-engines
+  },
+});
+
+const res = await s.search("DPDP Act India 2025", {
+  scoringPreset: "legal",
+  limit: 10,
+});
+```
+
+**Self-hosting on Fly.io (free tier):**
+```bash
+fly launch --image searxng/searxng --name my-searxng
+fly secrets set SEARXNG_SECRET_KEY=$(openssl rand -hex 32)
+fly deploy
+# Your endpoint: https://my-searxng.fly.dev
+```
+
+**Scoring presets** — tune the 4-factor cascade for your query type:
+
+| Preset | rrf | bm25 | authority | recency | Best for |
+|--------|-----|------|-----------|---------|----------|
+| `default` | 0.45 | 0.30 | 0.15 | 0.10 | General web |
+| `news` | 0.40 | 0.25 | 0.10 | 0.25 | Breaking news, current events |
+| `legal` | 0.45 | 0.35 | 0.18 | 0.02 | Laws, regulations, court orders |
+| `academic` | 0.42 | 0.33 | 0.22 | 0.03 | Research papers, journals |
+
+**Cross-encoder re-ranking** (optional — requires `onnxruntime-node`):
+```bash
+npm install onnxruntime-node
+node scripts/download-reranker.mjs   # downloads ~23MB ONNX model once
+```
+```typescript
+const res = await s.search("query", { rerank: true, rerankCandidates: 20 });
+```
+
+---
+
 ## Domain presets
 
 Named sets of authoritative domains for jurisdiction-scoped searches:
@@ -580,6 +632,17 @@ npx search100x "deep learning" --preset academic --stream
 | `timeoutMs` | `number` | `7000` | Total search timeout |
 | `newsRegion` | `string` | `"US"` | ISO 3166-1 alpha-2 country code |
 | `cache` | `IResultCache` | in-memory | Custom cache backend |
+| `searxng` | `SearXNGConfig` | — | SearXNG instance — adds ~70 sub-engines |
+
+**`SearXNGConfig`**
+
+| Option | Type | Description |
+|---|---|---|
+| `baseUrl` | `string` | SearXNG instance URL (e.g. `https://search100x.replit.app`) |
+| `token` | `string` | Bearer token if your instance requires auth |
+| `engines` | `string` | Comma-separated sub-engines, e.g. `"google,bing,brave,ddg"` — blank = all |
+| `language` | `string` | BCP-47 language code, default `"en"` |
+| `timeRange` | `string` | `"day"` \| `"week"` \| `"month"` \| `"year"` |
 
 ### `search(query, options?)`
 
