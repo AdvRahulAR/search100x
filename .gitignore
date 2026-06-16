@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.log
+.env
+.env.*
+
+# Internal Claude Code files
+CLAUDE.md
+compound-engineering.skill
+
+# Reference / planning docs
+searxng-master/
+Search.md
+
+# OS
+.DS_Store
+Thumbs.db
