@@ -101,15 +101,12 @@ export function cascadeScore(
  *   k        = smoothing constant (default 60, standard in literature)
  *
  * Properties:
- *  - A document at rank 1 in one engine: contributes  w_e / (60+1) ≈ 0.0164 w_e
- *  - Same document also at rank 10:      extra        w_e / (60+10) ≈ 0.0143 w_e
+ *  - A document at rank 1 in one engine: contributes  w_e / (10+1) ≈ 0.091 w_e
+ *  - Same document also at rank 10:      extra        w_e / (10+10) ≈ 0.050 w_e
  *  - Cross-engine agreement accumulates score linearly
- *  - k=60 prevents a single top-ranked result from dominating over
- *    a consensus result that appears in many engines at moderate ranks
- *
- * Scaling:
- *  - Adding a new engine = adding an entry to WEIGHTS, implementing the adapter
- *  - Changing k shifts the balance between rank-1 dominance and multi-engine consensus
+ *  
+ * Note: k=10 (not literature standard 60) is chosen to favor top results
+ * more heavily for LLM grounding use case. Higher k would flatten scores.
  */
 
 export const K = 10;
@@ -129,8 +126,20 @@ export function adjustedRank(rank: number, providerScore?: number, engine?: stri
   return rank * (1 - α * s);
 }
 
+// Adaptive K factors
+const ADAPTIVE_K_BASE = 0.29;      // Scaling factor for result count
+const ADAPTIVE_K_MIN = 10;          // Minimum k value
+const ADAPTIVE_K_MAX = 150;         // Maximum k value
+
+// Sigmoid normalization parameters
+const SIGMOID_MU_BASE = 0.12;       // Median RRF score reference
+const SIGMOID_BETA = 0.04;          // Sharpness of separation
+
 export function adaptiveK(totalResults: number): number {
-  return Math.min(150, Math.max(10, Math.floor(0.29 * totalResults)));
+  return Math.min(
+    ADAPTIVE_K_MAX, 
+    Math.max(ADAPTIVE_K_MIN, Math.floor(ADAPTIVE_K_BASE * totalResults))
+  );
 }
 
 /** Engine trust weights — must sum to ≤ N (they don't need to sum to 1) */
@@ -174,18 +183,13 @@ export function rrfScore(appearances: Appearance[], rrfK = K): number {
   );
 }
 
-const SIGMOID_MU   = 0.12;  // tune: median RRF score of a "good" result
-const SIGMOID_BETA = 0.04;  // tune: tighter = more separation at top
-
 /**
  * Normalise a list of RRF scores into [0, 1].
  * Uses shifted sigmoid normalisation scaled by engine count.
  */
-export function normaliseScores(
-  scores: number[],
-  engineCount = 3
-): number[] {
-  const mu   = SIGMOID_MU * (engineCount / 3);
+export function normaliseScores(scores: number[], engineCount = 3): number[] {
+  const mu = SIGMOID_MU_BASE * (engineCount / 3);
   const beta = SIGMOID_BETA;
   return scores.map(x => 1 / (1 + Math.exp(-(x - mu) / beta)));
 }
+

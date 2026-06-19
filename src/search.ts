@@ -1,5 +1,5 @@
 import {
-  SearchConfig, SearchOptions, SearchResponse, SearchResult, SourceName,
+  SearchConfig, SearchOptions, SearchResponse, SearchResult, SourceName, Logger,
 } from "./core/types.js";
 import { Engine, ENGINE_TIMEOUTS } from "./core/engine.js";
 import { ResultContainer } from "./core/container.js";
@@ -11,6 +11,7 @@ import { SCORING_PRESETS, DEFAULT_WEIGHTS } from "./core/scorer.js";
 import { rerankResults } from "./core/reranker.js";
 import { classifyQuery, detectLiveIntent } from "./core/classifier.js";
 import { reformulateQuery } from "./core/reformulator.js";
+import { defaultLogger, silentLogger } from "./core/logger.js";
 
 // Adapters
 import { DuckDuckGoEngine } from "./adapters/duckduckgo.js";
@@ -48,10 +49,10 @@ interface EngineEntry {
  * Each engine gets the REMAINING budget, not the full timeout — fast engines
  * don't inflate the wait time for the overall response.
  */
-function withDeadline<T>(promise: Promise<T>, remainingMs: number, label: string): Promise<T | null> {
+function withDeadline<T>(promise: Promise<T>, remainingMs: number, label: string, logger?: Logger): Promise<T | null> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      console.warn(`[search100x] ${label} timed out after ${Math.round(remainingMs)}ms`);
+      logger?.warn(`[search100x] ${label} timed out after ${Math.round(remainingMs)}ms`);
       resolve(null);
     }, remainingMs);
     promise.then((v) => { clearTimeout(timer); resolve(v); })
@@ -87,13 +88,16 @@ export class EnhancedSearch {
   private engineMap:  Map<SourceName, Engine>;
   private plugins:    Engine[] = [];
   private disabled =  new Set<SourceName>();
+  private logger:     Logger;
 
   constructor(config: SearchConfig = {}) {
-    this.config   = { timeoutMs: DEFAULT_TIMEOUT, newsRegion: DEFAULT_REGION, ...config };
+    this.config   = { timeoutMs: DEFAULT_TIMEOUT, newsRegion: DEFAULT_REGION, logger: defaultLogger, ...config };
+    this.logger   = this.config.logger ?? defaultLogger;
     this.cache    = config.cache ?? new ResultCache();
-    this.circuit  = new CircuitBreakerRegistry();
+    this.circuit  = new CircuitBreakerRegistry(this.logger);
     this.engineMap = this.initEngines();
   }
+
 
   // ── Plugin API ────────────────────────────────────────────────────────────
 
@@ -126,6 +130,10 @@ export class EnhancedSearch {
       rerank           = false,
       rerankCandidates = 20,
     } = options;
+
+    if (limit < 1 || limit > 100) {
+      throw new Error(`search100x: limit must be between 1 and 100, got ${limit}`);
+    }
 
     const autoClass  = classifyQuery(query);
     const preset     = scoringPreset
@@ -168,7 +176,8 @@ export class EnhancedSearch {
       const weatherResult = await withDeadline(
         weatherEngine.search(query, weatherTimeout),
         weatherTimeout,
-        "openmeteo"
+        "openmeteo",
+        this.logger
       );
       if (weatherResult !== null && weatherResult.length > 0) {
         // Pin this result to rank 1 — real-time data always wins over indexed pages
@@ -191,7 +200,7 @@ export class EnhancedSearch {
     activeEntries.forEach(({ engine, variant }) => {
       tasks.push((async () => {
         if (this.circuit.isOpen(engine.name)) {
-          console.warn(`[circuit] skipping ${engine.name} (OPEN)`);
+          this.logger.warn(`[circuit] skipping ${engine.name} (OPEN)`);
           return;
         }
         const engineTimeout = ENGINE_TIMEOUTS[engine.name] ?? totalTimeout;
@@ -199,7 +208,8 @@ export class EnhancedSearch {
         const result        = await withDeadline(
           engine.search(bundle[variant], remaining, bundle.timeRange, bundle.page),
           remaining,
-          engine.name
+          engine.name,
+          this.logger
         );
         if (result === null) {
           this.circuit.recordFailure(engine.name);
@@ -227,7 +237,8 @@ export class EnhancedSearch {
           const result        = await withDeadline(
             engine.search(eqBundle[variant], remaining, eqBundle.timeRange, eqBundle.page),
             remaining,
-            `${engine.name}:${eq}`
+            `${engine.name}:${eq}`,
+            this.logger
           );
           if (result === null) {
             this.circuit.recordFailure(engine.name);
@@ -289,6 +300,9 @@ export class EnhancedSearch {
     options: SearchOptions = {}
   ): AsyncGenerator<SearchResult[]> {
     const { limit = DEFAULT_LIMIT, scopedDomains, timeRange, page = 1 } = options;
+    if (limit < 1 || limit > 100) {
+      throw new Error(`search100x: limit must be between 1 and 100, got ${limit}`);
+    }
     const totalTimeout = this.config.timeoutMs ?? DEFAULT_TIMEOUT;
     const deadline     = Date.now() + totalTimeout;
     const bundle       = buildQueryBundle(query, scopedDomains, timeRange, page);
@@ -304,7 +318,8 @@ export class EnhancedSearch {
           const result    = await withDeadline(
             engine.search(bundle[variant], remaining, bundle.timeRange, bundle.page),
             remaining,
-            engine.name
+            engine.name,
+            this.logger
           );
           if (result === null) {
             this.circuit.recordFailure(engine.name);
@@ -317,11 +332,23 @@ export class EnhancedSearch {
       })().catch(() => i) // never let a job crash the generator
     );
 
-    // Drain in completion order: whichever engine finishes first yields first.
-    const remaining = new Map(jobs.map((p, i) => [i, p]));
-    while (remaining.size > 0) {
-      const idx = await Promise.race(remaining.values());
-      remaining.delete(idx);
+    // Track which engines have reported results
+    const completed = new Set<number>();
+
+    while (completed.size < jobs.length) {
+      // Race all remaining jobs
+      const pending = jobs
+        .map((p, i) => ({ promise: p, index: i }))
+        .filter(({ index }) => !completed.has(index));
+      
+      // Wait for next completion
+      const winner = await Promise.race(
+        pending.map(({ promise, index }) => 
+          promise.then(() => index)
+        )
+      );
+      
+      completed.add(winner);
       const snapshot = container.getResults(limit);
       if (snapshot.length > 0) yield snapshot;
     }
@@ -343,7 +370,7 @@ export class EnhancedSearch {
     const { newsRegion = DEFAULT_REGION, braveApiKey, tavilyApiKey, googleApiKey, googleCx } = this.config;
     const m = new Map<SourceName, Engine>();
 
-    m.set("duckduckgo", new DuckDuckGoEngine());
+    m.set("duckduckgo", new DuckDuckGoEngine(this.logger));
     m.set("bing",       new BingEngine(newsRegion));
     m.set("mojeek",     new MojeekEngine());
     m.set("googlenews", new GoogleNewsEngine(newsRegion));

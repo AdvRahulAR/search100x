@@ -1,3 +1,5 @@
+import { Logger } from "./types.js";
+
 /**
  * Per-engine circuit breaker.
  *
@@ -26,6 +28,8 @@ interface Breaker {
 
 export class CircuitBreakerRegistry {
   private breakers = new Map<string, Breaker>();
+
+  constructor(private logger?: Logger) {}
 
   private get(engine: string): Breaker {
     if (!this.breakers.has(engine)) {
@@ -79,11 +83,12 @@ export class CircuitBreakerRegistry {
       b.state = "OPEN";
       b.openedAt = now;
       b.halfOpenTrialActive = false;
-      console.warn(
+      this.logger?.warn(
         `[circuit] ${engine} tripped OPEN (${b.failures.length} failures in ${WINDOW_MS / 1000}s)`
       );
     }
   }
+
 
   status(): Record<string, { state: BreakerState; failures: number }> {
     const out: Record<string, { state: BreakerState; failures: number }> = {};

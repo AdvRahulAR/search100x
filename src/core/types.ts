@@ -111,6 +111,7 @@ export interface SearchConfig {
   cache?: import("./cache.js").IResultCache;
   /** Self-hosted or public SearXNG instance — adds ~70 sub-engines in one call */
   searxng?: SearXNGConfig;
+  logger?: Logger;
 }
 
 /**
@@ -176,3 +177,10 @@ export interface SearchResponse {
   sources: SourceName[];
   durationMs: number;
 }
+
+export interface Logger {
+  warn(msg: string): void;
+  log(msg: string): void;
+  debug?(msg: string): void;
+}
+

@@ -34,3 +34,15 @@ export { reformulateQuery }  from "./core/reformulator.js";
 export { domainReputation, spamSignalScore } from "./core/reputation.js";
 export { detectLiveIntent } from "./core/classifier.js";
 export type { LiveIntent } from "./core/classifier.js";
+
+export { DuckDuckGoEngine } from "./adapters/duckduckgo.js";
+export { BingEngine } from "./adapters/bing.js";
+export { MojeekEngine } from "./adapters/mojeek.js";
+export { GoogleNewsEngine } from "./adapters/googlenews.js";
+export { BingNewsEngine } from "./adapters/bingnews.js";
+export { WikipediaEngine } from "./adapters/wikipedia.js";
+export { OpenAlexEngine } from "./adapters/openalex.js";
+export { BraveEngine } from "./adapters/brave.js";
+export { TavilyEngine } from "./adapters/tavily.js";
+export { GoogleEngine } from "./adapters/google.js";
+
