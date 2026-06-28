@@ -139,7 +139,7 @@ import { EnhancedSearch } from "search100x";
 
 const s      = new EnhancedSearch();
 const genAI  = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
-const model  = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+const model  = genAI.getGenerativeModel({ model: "gemini-3.1-pro" });
 
 const query = "DPDP Act India compliance requirements";
 const res   = await s.search(query, { enrichContent: 5, limit: 8 });
