@@ -1,6 +1,6 @@
 import { parse } from "node-html-parser";
 import { Engine } from "../core/engine.js";
-import { RawResult } from "../core/types.js";
+import { RawResult, Logger } from "../core/types.js";
 import { stripHtml, truncate } from "../core/normalizer.js";
 import { http } from "../core/http.js";
 
@@ -51,6 +51,8 @@ export class DuckDuckGoEngine implements Engine {
   // no cross-request interference in multi-instance deployments.
   private vqdCache = new Map<string, { vqd: string; expiresAt: number }>();
 
+  constructor(private logger?: Logger) {}
+
   private getCachedVqd(query: string): string | undefined {
     const entry = this.vqdCache.get(query);
     if (!entry || Date.now() > entry.expiresAt) {
@@ -91,7 +93,7 @@ export class DuckDuckGoEngine implements Engine {
       const vqd = this.getCachedVqd(query);
       if (!vqd) {
         // Cannot paginate safely without VQD — DDG blocks requests without it
-        console.warn("[duckduckgo] no cached VQD for pagination — skipping page", page);
+        this.logger?.warn(`[duckduckgo] no cached VQD for pagination — skipping page ${page}`);
         return [];
       }
       form.set("vqd", vqd);
@@ -107,6 +109,7 @@ export class DuckDuckGoEngine implements Engine {
     const res = await http.post(DDG_URL, form.toString(), {
       timeout: timeoutMs,
       headers: DDG_HEADERS,
+      responseType: "text",
     });
 
     const html = res.data as string;
@@ -114,7 +117,7 @@ export class DuckDuckGoEngine implements Engine {
 
     // CAPTCHA guard
     if (root.querySelector("form#challenge-form")) {
-      console.warn("[duckduckgo] CAPTCHA detected — returning empty results");
+      this.logger?.warn("[duckduckgo] CAPTCHA detected — returning empty results");
       return [];
     }
 
@@ -140,3 +143,4 @@ export class DuckDuckGoEngine implements Engine {
     return results;
   }
 }
+

@@ -4,9 +4,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface RawResult {
-  title: string;
-  url: string;
-  snippet: string;
+  title:       string;
+  url:         string;
+  snippet:     string;
+  /** SearXNG only: names of sub-engines that returned this result (e.g. ["google","bing"]) */
+  subEngines?: string[];
+  /** Publication date — populated by news adapters and SearXNG */
+  publishedAt?: Date;
+  providerScore?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -18,6 +23,7 @@ export interface Appearance {
   engine: string;
   weight: number;
   rank: number;
+  providerScore?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -46,7 +52,11 @@ export type SourceName =
   | "openalex"
   | "brave"
   | "tavily"
-  | "google";
+  | "google"
+  | "searxng"
+  | "marginalia"
+  | "yep"
+  | "openmeteo";
 
 /** Coarse category of a search result — set by the engine that found it. */
 export type ResultType = "web" | "news" | "academic" | "encyclopedia";
@@ -70,6 +80,19 @@ export interface SearchResult {
   type?: ResultType;
 }
 
+export interface SearXNGConfig {
+  /** Base URL of your SearXNG instance, e.g. "https://searx.example.com" */
+  baseUrl:    string;
+  /** Bearer token if your instance requires Authorization header */
+  token?:     string;
+  /** Comma-separated sub-engines to enable, e.g. "google,bing,brave,ddg" — blank = all */
+  engines?:   string;
+  /** BCP-47 language code, default "en" */
+  language?:  string;
+  /** Native freshness filter passed to SearXNG */
+  timeRange?: "day" | "week" | "month" | "year";
+}
+
 export interface SearchConfig {
   braveApiKey?: string;
   tavilyApiKey?: string;
@@ -86,6 +109,9 @@ export interface SearchConfig {
    * Use FileResultCache for persistence across process restarts.
    */
   cache?: import("./cache.js").IResultCache;
+  /** Self-hosted or public SearXNG instance — adds ~70 sub-engines in one call */
+  searxng?: SearXNGConfig;
+  logger?: Logger;
 }
 
 /**
@@ -125,6 +151,23 @@ export interface SearchOptions {
   enrichContent?: number;
   /** Skip result cache for this query (default: false) */
   noCache?: boolean;
+  /**
+   * Scoring preset — adjusts the 4-factor cascade weights.
+   * "default"  → general web (rrf×0.45, bm25×0.30, authority×0.15, recency×0.10)
+   * "news"     → freshness-weighted (recency×0.25)
+   * "legal"    → authority + term precision, near-zero recency
+   * "academic" → authority-heavy, term precision high
+   */
+  scoringPreset?: "default" | "news" | "legal" | "academic";
+  /**
+   * Re-rank top-N results using a cross-encoder model after RRF+BM25 scoring.
+   * Requires onnxruntime-node and the bundled ONNX model. Default: false.
+   */
+  rerank?: boolean;
+  /** Number of candidates passed to the cross-encoder (default: 20) */
+  rerankCandidates?: number;
+  /** Enable multi-variant query fan-out for higher recall (default: false) */
+  reformulate?: boolean;
 }
 
 export interface SearchResponse {
@@ -134,3 +177,10 @@ export interface SearchResponse {
   sources: SourceName[];
   durationMs: number;
 }
+
+export interface Logger {
+  warn(msg: string): void;
+  log(msg: string): void;
+  debug?(msg: string): void;
+}
+

@@ -1,12 +1,3 @@
-/**
- * Result cache — two backends, same interface.
- *
- * ResultCache     — in-memory Map, fast, lost on restart (default)
- * FileResultCache — JSON file on disk, survives restarts, zero new deps
- *
- * Pass either to new EnhancedSearch({ cache: ... }).
- */
-
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { SearchResult } from "./types.js";
@@ -14,22 +5,81 @@ import { SearchResult } from "./types.js";
 export interface CacheEntry {
   results: SearchResult[];
   expiresAt: number;
+  query?: string;
+  sources?: string[];
 }
 
 export const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+const STOP = new Set(["what","are","the","is","a","an","of","in","for","how","do","does","to","and","or"]);
+
+export function stem(w: string): string {
+  return w
+    .replace(/ing$/, "").replace(/tion$/, "").replace(/tions$/, "")
+    .replace(/ment$/, "").replace(/ments$/, "").replace(/ness$/, "")
+    .replace(/ies$/, "y").replace(/es$/, "").replace(/s$/, "")
+    .replace(/ed$/, "");
+}
+
+function fnv1a(str: string): bigint {
+  let h = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  for (let i = 0; i < str.length; i++) {
+    h ^= BigInt(str.charCodeAt(i));
+    h = (h * prime) & 0xffffffffffffffffn;
+  }
+  return h;
+}
+
+export function simhash(query: string): bigint {
+  const tokens = query.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .split(/\s+/)
+    .filter(t => t.length > 1 && !STOP.has(t))
+    .sort();
+
+  let fp = 0n;
+  for (const tok of tokens) {
+    const h = fnv1a(tok);
+    const idx1 = Number(h % 64n);
+    const idx2 = Number((h >> 6n) % 64n);
+    fp |= (1n << BigInt(idx1));
+    fp |= (1n << BigInt(idx2));
+  }
+  return fp;
+}
+
+export function hammingDistance(a: bigint, b: bigint): number {
+  let x = a ^ b, d = 0;
+  while (x) { x &= x - 1n; d++; }   // Kernighan's bit-count
+  return d;
+}
+
+export function queryFingerprint(query: string): string {
+  const tokens = query.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .split(/\s+/)
+    .filter(t => t.length > 2 && !STOP.has(t))
+    .map(stem)
+    .sort();
+
+  const canonical = [...new Set(tokens)].join("|");
+  return createHash("sha256").update(canonical).digest("hex").slice(0, 24);
+}
+
 // ── Common interface ──────────────────────────────────────────────────────────
 
 export interface IResultCache {
-  get(key: string): SearchResult[] | undefined;
-  set(key: string, results: SearchResult[]): void;
+  get(key: string, query?: string, sources?: string[]): SearchResult[] | undefined;
+  set(key: string, results: SearchResult[], query?: string, sources?: string[]): void;
   evict(): void;
 }
 
 // ── Shared key builder ────────────────────────────────────────────────────────
 
 export function cacheKey(query: string, sources: string[]): string {
-  const canonical = query.trim().toLowerCase() + "|" + [...sources].sort().join(",");
+  const fingerprint = queryFingerprint(query);
+  const canonical = fingerprint + "|" + [...sources].sort().join(",");
   return createHash("sha256").update(canonical).digest("hex").slice(0, 16);
 }
 
@@ -48,18 +98,43 @@ export class ResultCache implements IResultCache {
     return cacheKey(query, sources);
   }
 
-  get(key: string): SearchResult[] | undefined {
+  get(key: string, query?: string, sources?: string[]): SearchResult[] | undefined {
+    // 1. Fast path: exact matching key
     const entry = this.store.get(key);
-    if (!entry) return undefined;
-    if (Date.now() > entry.expiresAt) {
-      this.store.delete(key);
-      return undefined;
+    if (entry) {
+      if (Date.now() > entry.expiresAt) {
+        this.store.delete(key);
+        return undefined;
+      }
+      return entry.results;
     }
-    return entry.results;
+
+    // 2. Soft path: SimHash matching
+    if (query && sources) {
+      const querySig = simhash(query);
+      const sourcesSorted = [...sources].sort().join(",");
+      for (const [k, e] of this.store.entries()) {
+        if (Date.now() > e.expiresAt) {
+          this.store.delete(k);
+          continue;
+        }
+        if (e.query && e.sources) {
+          const eSourcesSorted = [...e.sources].sort().join(",");
+          if (sourcesSorted !== eSourcesSorted) continue;
+
+          const eSig = simhash(e.query);
+          if (hammingDistance(querySig, eSig) <= 3) {
+            return e.results;
+          }
+        }
+      }
+    }
+
+    return undefined;
   }
 
-  set(key: string, results: SearchResult[]): void {
-    this.store.set(key, { results, expiresAt: Date.now() + this.ttlMs });
+  set(key: string, results: SearchResult[], query?: string, sources?: string[]): void {
+    this.store.set(key, { results, expiresAt: Date.now() + this.ttlMs, query, sources });
   }
 
   evict(): void {
@@ -75,17 +150,6 @@ export class ResultCache implements IResultCache {
 
 // ── File-backed cache (optional, survives restarts) ───────────────────────────
 
-/**
- * Persistent cache that writes to a JSON file using Node's built-in fs.
- * Zero new dependencies.
- *
- * Usage:
- *   const s = new EnhancedSearch({ cache: new FileResultCache("/tmp/search.json") });
- *
- * Write strategy: write-through on every set().  On get() the file is loaded
- * lazily once per process lifetime and then kept in-memory with write-through.
- * Suitable for server and CLI use; not designed for high-concurrency writes.
- */
 export class FileResultCache implements IResultCache {
   private memory = new Map<string, CacheEntry>();
   private loaded = false;
@@ -122,20 +186,43 @@ export class FileResultCache implements IResultCache {
     }
   }
 
-  get(key: string): SearchResult[] | undefined {
+  get(key: string, query?: string, sources?: string[]): SearchResult[] | undefined {
     this.load();
     const entry = this.memory.get(key);
-    if (!entry) return undefined;
-    if (Date.now() > entry.expiresAt) {
-      this.memory.delete(key);
-      return undefined;
+    if (entry) {
+      if (Date.now() > entry.expiresAt) {
+        this.memory.delete(key);
+        return undefined;
+      }
+      return entry.results;
     }
-    return entry.results;
+
+    if (query && sources) {
+      const querySig = simhash(query);
+      const sourcesSorted = [...sources].sort().join(",");
+      for (const [k, e] of this.memory.entries()) {
+        if (Date.now() > e.expiresAt) {
+          this.memory.delete(k);
+          continue;
+        }
+        if (e.query && e.sources) {
+          const eSourcesSorted = [...e.sources].sort().join(",");
+          if (sourcesSorted !== eSourcesSorted) continue;
+
+          const eSig = simhash(e.query);
+          if (hammingDistance(querySig, eSig) <= 3) {
+            return e.results;
+          }
+        }
+      }
+    }
+
+    return undefined;
   }
 
-  set(key: string, results: SearchResult[]): void {
+  set(key: string, results: SearchResult[], query?: string, sources?: string[]): void {
     this.load();
-    this.memory.set(key, { results, expiresAt: Date.now() + this.ttlMs });
+    this.memory.set(key, { results, expiresAt: Date.now() + this.ttlMs, query, sources });
     this.flush();
   }
 
