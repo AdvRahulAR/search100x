@@ -61,6 +61,15 @@ const CLASS_SIGNALS: Record<string, Record<string, number>> = {
     defendant: 3.0, attorney: 2.5, litigation: 3.0, judgment: 2.5,
     // Jurisdictions
     gdpr: 3.0, hipaa: 3.0, ccpa: 3.0, sebi: 2.5, rbi: 2.0,
+    // Indian legal terms
+    ipc: 3.0, crpc: 3.0, scc: 2.5, air: 1.8, fir: 2.5,
+    "indian penal code": 3.0, "code of criminal procedure": 3.0,
+    "constitution of india": 3.0, "article 21": 2.8,
+    "section 498a": 3.0, "section 302": 2.5, "section 376": 2.5,
+    "high court": 2.2, "supreme court": 2.5, "writ petition": 3.0,
+    "public interest litigation": 3.0, pil: 2.0,
+    "dowry prohibition": 2.5, "domestic violence": 2.2,
+    "indiankanoon": 2.5, "bharatiya": 2.5,
   },
   academic: {
     // Research signals
