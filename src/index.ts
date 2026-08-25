@@ -13,7 +13,7 @@ export type {
   TimeRange,
   ResultType,
 } from "./core/types.js";
-export { ENGINE_WEIGHTS, K, rrfScore, normaliseScores, urlAuthorityScore, recencyScore, cascadeScore, DEFAULT_WEIGHTS, NEWS_WEIGHTS, LEGAL_WEIGHTS, ACADEMIC_WEIGHTS, SCORING_PRESETS } from "./core/scorer.js";
+export { ENGINE_WEIGHTS, K, rrfScore, normalizeScores, urlAuthorityScore, recencyScore, cascadeScore, DEFAULT_WEIGHTS, NEWS_WEIGHTS, LEGAL_WEIGHTS, ACADEMIC_WEIGHTS, SCORING_PRESETS } from "./core/scorer.js";
 export type { CascadeWeights } from "./core/scorer.js";
 export { normalizeUrl, urlKey } from "./core/normalizer.js";
 export { bm25Scores, blendScores, BM25_ALPHA, normaliseScores as normaliseBm25Scores, legalCitations } from "./core/bm25.js";
@@ -45,3 +45,18 @@ export { OpenAlexEngine } from "./adapters/openalex.js";
 export { BraveEngine, BraveFreeEngine } from "./adapters/brave.js";
 export { TavilyEngine } from "./adapters/tavily.js";
 export { GoogleEngine } from "./adapters/google.js";
+
+// v3.0.0 exports
+export { IndiaCodeEngine, SebiEngine } from "./adapters/indiacode.js";
+export { WikipediaFullTextEngine, DuckDuckGoLiteEngine, GoogleNewsIndiaEngine } from "./adapters/enhanced-engines.js";
+export { extractContent, extractPdfText, isPdfContentType } from "./core/extractor.js";
+export { ConnectionPool, globalPool, pMap } from "./core/pool.js";
+export {
+  contentSimhash, hamming64, dedupByContent,
+  SemanticCache, freshnessTtl, isCacheFresh,
+} from "./core/simhash.js";
+export type { DedupResult } from "./core/simhash.js";
+export {
+  isSsrfSafe, isRedirectSafe, detectPromptInjection, BloomFilter, lostInTheMiddleRerank,
+} from "./core/security.js";
+export type { SsrfCheckResult, InjectionCheckResult } from "./core/security.js";
