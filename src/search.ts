@@ -226,7 +226,11 @@ export class EnhancedSearch {
     }
 
     if (enrichContent > 0 && results.length > 0) {
-      results = await enrichContents(results, enrichContent, Math.min(totalTimeout, 8_000), query);
+      // Auto-detect legal queries and use legal mode: 500-word windows,
+      // 12000-char cap, jurisdiction-aware BM25 boost, citation-aware scoring
+      const isLegal = preset === "legal";
+      const enrichTimeout = Math.min(totalTimeout, isLegal ? 8_000 : 8_000);
+      results = await enrichContents(results, enrichContent, enrichTimeout, query, { legalMode: isLegal });
     }
 
     if (rerank && results.length > 0) {
