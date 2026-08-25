@@ -8,6 +8,13 @@ const BOOST_DOMAINS: Record<string, number> = {
   "ft.com": 0.82, "economist.com": 0.82, "theatlantic.com": 0.78,
   // Legal/regulatory
   "law.cornell.edu": 0.95, "sec.gov": 0.95, "eur-lex.europa.eu": 0.95,
+  // Indian legal sources
+  "indiankanoon.org": 0.95, "main.sci.gov.in": 0.95, "sci.gov.in": 0.95,
+  "indiacode.nic.in": 0.95, "legislative.gov.in": 0.93, "sebi.gov.in": 0.90,
+  "rbi.org.in": 0.90, "irdai.gov.in": 0.88, "trai.gov.in": 0.85,
+  "mca.gov.in": 0.90, "ibbi.gov.in": 0.88,
+  // Indian legal news / commentary
+  "livelaw.in": 0.85, "barandbench.com": 0.82, "scconline.com": 0.80,
   // Academic
   "scholar.google.com": 0.88, "semanticscholar.org": 0.85,
 };
@@ -20,7 +27,7 @@ const PENALISE_PATTERNS = [
 ];
 
 const GOV_EDU = /\.(gov|edu|ac\.[a-z]{2,4})$/;
-const TRUSTED  = /wikipedia\.org|reuters\.com|bbc\.(com|co\.uk)|arxiv\.org|pubmed\.ncbi|nature\.com|science\.org/;
+const TRUSTED  = /wikipedia\.org|reuters\.com|bbc\.(com|co\.uk)|arxiv\.org|pubmed\.ncbi|nature\.com|science\.org|indiankanoon\.org|main\.sci\.gov\.in|sci\.gov\.in|indiacode\.nic\.in/;
 const ORG      = /\.org$/;
 
 function getBaseTldScore(host: string): number {
