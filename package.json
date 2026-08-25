@@ -1,6 +1,6 @@
 {
   "name": "search100x",
-  "version": "2.5.0",
+  "version": "3.0.0",
   "description": "Multi-source web search for LLM grounding — works with any model provider",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -31,7 +31,8 @@
     "search", "web-search", "llm", "llm-grounding", "rag", "ai-agent",
     "langchain", "vercel-ai", "claude", "openai", "sarvam", "hermes",
     "legal", "india-legal", "rrf", "bm25", "citations", "brave",
-    "tavily", "wikipedia"
+    "tavily", "wikipedia", "searxng", "simhash", "ssrf", "trafilatura",
+    "indiacode", "sebi", "mcp-server"
   ],
   "author": "Rahul - Dharmabot AI",
   "license": "MIT",
@@ -47,7 +48,8 @@
     "node-html-parser": "^6.1.0"
   },
   "optionalDependencies": {
-    "express": "^4.18.0"
+    "express": "^4.18.0",
+    "unpdf": "^0.12.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.0",
