@@ -56,6 +56,45 @@ const COMPOUND_PATTERNS: RegExp[] = [
   /\bbns\b/gi,
   /\bbnss\b/gi,
   /\bbsa\b/gi,
+  // US legal citations
+  /\b\d{1,2}\s+u\.?\s*s\.?\s*c\.?\s*§?\s*\d[\w.\-]*/gi,
+  /\b\d{1,2}\s+cfr\s+\d+/gi,
+  /\be\.?\s*o\.?\s+\d{3,6}\b/gi,
+  /\bexecutive\s+order\s+\d{3,6}\b/gi,
+  /\b\d+\s+fr\s+\d{2,6}/gi,
+  /\bpub\.?\s*l\.?\s*\d+[\-–]\d+/gi,
+  /\b\d+\s+stat\.?\s+\d+/gi,
+  // Indian reporter citations (from open-india-law)
+  /\bair\s+\d{4}\s+(?:[A-Z][a-z]*(?:&[A-Z])?|SC|FC)\s+\d+\b/gi,
+  /\(\d{4}\)\s*\d{1,2}\s*scc\s+\d+/gi,
+  /\b\d{4}\s+scc\s+\d{1,2}\s+\d+\b/gi,
+  /\b\d{4}\s+scc\s+online\s+sc\s+\d+\b/gi,
+  /\b\d{4}\s+scc\s+online\s+[A-Z][a-z]{2,4}\s+\d+\b/gi,
+  /\bscr\s*\(\d{1,2}\)\s*\d{4}\s+\d+\b/gi,
+  /\[\d{4}\]\s*\d{1,2}\s*scr\s+\d+\b/gi,
+  /\bmanu\/[A-Z]{2,4}\/\d{4}\/\d+\b/gi,
+  /\b\d{4}\s+insc\s+\d+\b/gi,
+  /\b\d{4}:[A-Z]{2,4}(?:-[A-Z]{2,4})?:\d+(?:-DB)?\b/gi,
+  /\b\d{4}\/[A-Z]{2,4}\/\d+\b/gi,
+  /\(\d{4}\)\s*\d{1,2}\s*scale\s+\d+/gi,
+  /\bjt\s+\d{4}\s*\(\d{1,2}\)\s*sc\s+\d+\b/gi,
+  /\b\d{4}\s*\(\d{1,2}\)\s*bom\s*lr\s+\d+\b/gi,
+  /\b\d{4}\s*\(\d{1,2}\)\s*dlt\s+\d+\b/gi,
+  /\b\d{4}\s+guj\s*lr\s+\d+\b/gi,
+  /\b\d{4}\s*\(\d{1,2}\)\s*klj\s+\d+\b/gi,
+  /\b\d{4}\s*\(\d{1,2}\)\s*klt\s+\d+\b/gi,
+  /\b\d{4}\s*\(\d{1,2}\)\s*mlw\s+\d+\b/gi,
+  /\b\d{4}\s+alj\s+\d+\b/gi,
+  /\bplr\s+\d{4}\s+\d+\b/gi,
+  /\b\d{4}\s*\(\d{1,2}\)\s*cwn\s+\d+\b/gi,
+  /\b\d{4}\s+itat\s+\d+\b|\bita\s*no\.?\s*\d+\/\w+\/\d{4}\b/gi,
+  /\b(?:nclt|nclat)\s*(?:order\s*)?(?:dated\s*)?(?:\d{1,2}[./]\d{1,2}[./]\d{2,4})?\s*(?:in\s*)?(?:CP|CA|TA)?\s*(?:No\.?)?\s*\d+/gi,
+  /\bilr\s+\d{4}\s+[A-Za-z]+\s+\d{1,2}\s+\d+\b/gi,
+  /\b\d{4}\s+cri\s*lj\s+\d+\b/gi,
+  /\(\d{4}\)\s*\d{1,3}\s*comp\s*cas\s+\d+/gi,
+  /\(\d{4}\)\s*\d{1,3}\s*itr\s+\d+/gi,
+  /\(\d{4}\)\s*\d{1,3}\s*taxman\s+\d+/gi,
+  /\b\d{4}\s+gst\s+\d+\b/gi,
 ];
 
 const LEGAL_PHRASES: RegExp[] = [
@@ -77,12 +116,25 @@ const LEGAL_PHRASES: RegExp[] = [
   /\bbharatiya nyaya sanhita\b/gi,
   /\bbharatiya nagarik suraksha sanhita\b/gi,
   /\bconstitution of india\b/gi,
+  // US legal phrases
+  /\bunited states code\b/gi,
+  /\bcode of federal regulations\b/gi,
+  /\bfederal register\b/gi,
+  /\bexecutive order\b/gi,
+  /\bpublic law\b/gi,
+  /\bstatutes at large\b/gi,
+  /\bsupreme court of the united states\b/gi,
+  /\bcircuit court of appeals\b/gi,
+  /\bdistrict court\b/gi,
+  /\bclass action\b/gi,
+  /\bsummary judgment\b/gi,
+  /\bgrand jury\b/gi,
+  /\bpetit jury\b/gi,
 ];
 
 export function tokenize(text: string): string[] {
   let working = text.toLowerCase();
   const compounds: string[] = [];
-
   for (const pattern of COMPOUND_PATTERNS) {
     const globalPattern = new RegExp(pattern.source, pattern.flags);
     let match;
@@ -91,7 +143,6 @@ export function tokenize(text: string): string[] {
     }
     working = working.replace(globalPattern, " ");
   }
-
   for (const pattern of LEGAL_PHRASES) {
     const globalPattern = new RegExp(pattern.source, pattern.flags);
     let match;
@@ -100,12 +151,10 @@ export function tokenize(text: string): string[] {
     }
     working = working.replace(globalPattern, " ");
   }
-
   const genericTokens = working
     .replace(/[^\w\s]/g, " ")
     .split(/\s+/)
     .filter((t) => t.length > 1 && !STOPWORDS.has(t));
-
   return [...compounds, ...genericTokens];
 }
 
@@ -114,11 +163,9 @@ export function snippetRelevanceScore(snippet: string, queryTokens: string[]): n
   const snippetTokens = snippet.toLowerCase().split(/\s+/);
   const tf = new Map<string, number>();
   for (const t of snippetTokens) tf.set(t, (tf.get(t) ?? 0) + 1);
-
   let score = 0;
   const N = snippetTokens.length;
   const avgLen = 40;
-
   for (const qt of queryTokens) {
     const f = tf.get(qt) ?? 0;
     if (f === 0) continue;
@@ -126,7 +173,6 @@ export function snippetRelevanceScore(snippet: string, queryTokens: string[]): n
     const K = k1 * (1 - b + b * N / avgLen);
     score += (f * (k1 + 1)) / (f + K) + δ;
   }
-
   return Math.min(1, score / queryTokens.length);
 }
 
@@ -139,22 +185,19 @@ function termFreq(tokens: string[]): Map<string, number> {
 export function bm25Scores(query: string, docs: string[]): number[] {
   const qTerms = tokenize(query);
   if (qTerms.length === 0 || docs.length === 0) return docs.map(() => 0);
-
-  const N         = docs.length;
+  const N = docs.length;
   const tokenized = docs.map(tokenize);
-  const tfs       = tokenized.map(termFreq);
-  const totalLen  = tokenized.reduce((s, t) => s + t.length, 0);
-  const avgDl     = totalLen / N || 1;
-
+  const tfs = tokenized.map(termFreq);
+  const totalLen = tokenized.reduce((s, t) => s + t.length, 0);
+  const avgDl = totalLen / N || 1;
   const idf = new Map<string, number>();
   for (const term of qTerms) {
     if (idf.has(term)) continue;
     const df = tokenized.filter((tok) => tok.includes(term)).length;
     idf.set(term, Math.log((N - df + 0.5) / (df + 0.5) + 1));
   }
-
   return tfs.map((tf, i) => {
-    const dl      = tokenized[i].length;
+    const dl = tokenized[i].length;
     const lenNorm = 1 - B + B * (dl / avgDl);
     let score = 0;
     for (const term of qTerms) {
@@ -170,33 +213,51 @@ export function bm25Scores(query: string, docs: string[]): number[] {
 export const BM25_ALPHA = 0.4;
 
 export function blendScores(rrfNorm: number[], bm25Raw: number[]): number[] {
-  const max   = Math.max(...bm25Raw);
-  const min   = Math.min(...bm25Raw);
+  const max = Math.max(...bm25Raw);
+  const min = Math.min(...bm25Raw);
   const range = max - min;
   const bm25Norm = range === 0
     ? bm25Raw.map(() => 0.5)
     : bm25Raw.map((s) => (s - min) / range);
-
   return rrfNorm.map((rrf, i) => BM25_ALPHA * rrf + (1 - BM25_ALPHA) * bm25Norm[i]);
 }
 
 export function normaliseScores(raw: number[]): number[] {
-  const max   = Math.max(...raw);
-  const min   = Math.min(...raw);
+  const max = Math.max(...raw);
+  const min = Math.min(...raw);
   const range = max - min;
   if (range === 0) return raw.map(() => 0.5);
   return raw.map((s) => (s - min) / range);
 }
 
-// ── Legal citation extraction ─────────────────────────────────────────────────
+// Legal citation extraction
 
 const CITATION_REGEXES: RegExp[] = [
+  // Indian citations
   /\bsection\s+\d+[a-z]*\b/gi,
   /\barticle\s+\d+[a-z]*\b/gi,
-  /\bair\s+\d{4}\s+sc\s+\d+/gi,
-  /\b(19|20)\d{2}\s+\d+\s+scc\s+\d+/gi,
   /\bw\.?\s*p\.?\s*no\.?\s*\d+/gi,
   /\bcrl\.?\s*a\.?\s*no\.?\s*\d+/gi,
+  // Indian reporter citations (from open-india-law)
+  /\bair\s+\d{4}\s+(?:[A-Z][a-z]*(?:&[A-Z])?|SC|FC)\s+\d+\b/gi,
+  /\(\d{4}\)\s*\d{1,2}\s*scc\s+\d+/gi,
+  /\b\d{4}\s+scc\s+\d{1,2}\s+\d+\b/gi,
+  /\b\d{4}\s+scc\s+online\s+sc\s+\d+\b/gi,
+  /\b\d{4}\s+scc\s+online\s+[A-Z][a-z]{2,4}\s+\d+\b/gi,
+  /\bmanu\/[A-Z]{2,4}\/\d{4}\/\d+\b/gi,
+  /\b\d{4}\s+insc\s+\d+\b/gi,
+  /\b\d{4}:[A-Z]{2,4}(?:-[A-Z]{2,4})?:\d+(?:-DB)?\b/gi,
+  /\bilr\s+\d{4}\s+[A-Za-z]+\s+\d{1,2}\s+\d+\b/gi,
+  /\b\d{4}\s+cri\s*lj\s+\d+\b/gi,
+  /\(\d{4}\)\s*\d{1,3}\s*itr\s+\d+/gi,
+  /\b\d{4}\s+gst\s+\d+\b/gi,
+  // US citations
+  /\b\d{1,2}\s+u\.?\s*s\.?\s*c\.?\s*§?\s*\d[\w.\-]*/gi,
+  /\b\d{1,2}\s+cfr\s+\d+/gi,
+  /\be\.?\s*o\.?\s+\d{3,6}\b/gi,
+  /\b\d+\s+fr\s+\d{2,6}/gi,
+  /\bpub\.?\s*l\.?\s*\d+[\-–]\d+/gi,
+  /\b\d+\s+stat\.?\s+\d+/gi,
 ];
 
 export function legalCitations(text: string): string[] {
