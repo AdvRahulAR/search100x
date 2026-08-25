@@ -8,13 +8,17 @@
  *
  * enrichSnippets()  → uses fetchBestPassage()     → populates result.snippet
  * enrichContents()  → uses fetchRelevantContent() → populates result.content
+ * enrichContentsLegal() → uses fetchRelevantContent() with legalMode=true
+ *
+ * Legal mode: 500-word windows, 12000-char cap, jurisdiction-aware BM25 boost,
+ * citation-aware passage scoring. Auto-detected from classifier output.
  *
  * result.content is the input for toDocuments() → Claude Citations API.
  */
 
 import { parse } from "node-html-parser";
 import { http } from "./http.js";
-import { bm25Scores } from "./bm25.js";
+import { bm25Scores, legalCitations } from "./bm25.js";
 
 const FETCH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0";
 
@@ -40,6 +44,22 @@ const FETCH_HEADERS = {
   Accept:            "text/html,application/xhtml+xml",
   "Accept-Language": "en-US,en;q=0.9",
 };
+
+// ── Jurisdiction domain patterns for legal passage boosting ───────────────────
+
+const INDIAN_LEGAL_DOMAINS = /\.(gov\.in|nic\.in)$/i;
+const INDIAN_LEGAL_SITES = /indiankanoon\.org|livelaw\.in|barandbench\.com|scconline\.com|main\.sci\.gov\.in|sci\.gov\.in/i;
+const US_LEGAL_DOMAINS = /\.(gov|edu)$/i;
+const US_LEGAL_SITES = /law\.cornell\.edu|sec\.gov|congress\.gov|justice\.gov|federalregister\.gov|regulations\.gov/i;
+const EU_LEGAL_SITES = /eur-lex\.europa\.eu|europarl\.europa\.eu|ec\.europa\.eu|edpb\.europa\.eu|curia\.europa\.eu/i;
+
+function jurisdictionBoost(url: string, isLegalQuery: boolean): number {
+  if (!isLegalQuery) return 1.0;
+  if (INDIAN_LEGAL_DOMAINS.test(url) || INDIAN_LEGAL_SITES.test(url)) return 1.2;
+  if (US_LEGAL_DOMAINS.test(url) || US_LEGAL_SITES.test(url)) return 1.15;
+  if (EU_LEGAL_SITES.test(url)) return 1.1;
+  return 1.0;
+}
 
 // ── HTML fetch + clean ────────────────────────────────────────────────────────
 
@@ -73,10 +93,6 @@ async function fetchCleanText(url: string, timeoutMs: number): Promise<string | 
 
 // ── Passage splitter ──────────────────────────────────────────────────────────
 
-/**
- * Split text into overlapping ~200-word windows.
- * Overlap of 50 words prevents a relevant sentence being cut across a boundary.
- */
 function passages(text: string, windowWords = 200, overlapWords = 50): string[] {
   const words = text.split(" ");
   if (words.length <= windowWords) return [text];
@@ -92,10 +108,6 @@ function passages(text: string, windowWords = 200, overlapWords = 50): string[] 
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/**
- * Fetch the URL and return the passage most relevant to `query`.
- * Falls back to the first 600 chars if BM25 scoring finds nothing useful.
- */
 export async function fetchBestPassage(
   url:       string,
   query:     string,
@@ -108,24 +120,17 @@ export async function fetchBestPassage(
   const windows = passages(text);
 
   if (windows.length === 1) {
-    // Short page — just truncate
     return truncateToWord(text, maxChars);
   }
 
-  // Score each passage against the query with BM25
   const scores  = bm25Scores(query, windows);
   const bestIdx = scores.indexOf(Math.max(...scores));
   const best    = windows[bestIdx];
 
-  // If BM25 found no overlap (all zeros), fall back to first passage
   const winner = scores[bestIdx] > 0 ? best : windows[0];
   return truncateToWord(winner, maxChars);
 }
 
-/**
- * Legacy: fetch URL and return first ~maxChars of cleaned main content.
- * Used when no query is available.
- */
 export async function fetchPageContent(
   url:      string,
   timeoutMs = 5_000,
@@ -142,10 +147,6 @@ function truncateToWord(text: string, maxChars: number): string {
   return text.slice(0, cut > 0 ? cut : maxChars) + "…";
 }
 
-/**
- * Enrich top-N results with best-passage content fetched in parallel.
- * Replaces the snippet only when the fetched passage is longer and non-empty.
- */
 export async function enrichSnippets<T extends { url: string; snippet: string }>(
   results:   T[],
   topN       = 3,
@@ -173,29 +174,15 @@ export async function enrichSnippets<T extends { url: string; snippet: string }>
 
 // ── Full relevant content (multi-passage) ─────────────────────────────────────
 
-/**
- * Fetch a page and return ALL passages that are relevant to the query,
- * joined in document order.
- *
- * Algorithm:
- *  1. Score every 200-word window with BM25 against the query
- *  2. Discard windows scoring below minScore (irrelevant noise)
- *  3. Non-maximum suppression: greedily select non-overlapping windows
- *     in score-descending order, up to maxPassages
- *  4. Re-sort selected windows by their position in the document
- *  5. Join with "\n\n" — coherent reading order, multiple angles covered
- *
- * This is what makes cited answers work: the LLM sees the full relevant
- * section of each article, not just the opening paragraph.
- */
 export async function fetchRelevantContent(
   url:      string,
   query:    string,
   options: {
-    maxPassages?: number;  // max non-overlapping passages to include (default 5)
-    minScore?:   number;   // BM25 threshold — passages below this are noise (default 0.08)
-    maxChars?:   number;   // hard cap on total returned chars (default 3000)
+    maxPassages?: number;
+    minScore?:   number;
+    maxChars?:   number;
     timeoutMs?:  number;
+    legalMode?:  boolean;
   } = {}
 ): Promise<string | undefined> {
   const {
@@ -203,65 +190,66 @@ export async function fetchRelevantContent(
     minScore    = 0.08,
     maxChars    = 3_000,
     timeoutMs   = 6_000,
+    legalMode   = false,
   } = options;
+
+  const WINDOW      = legalMode ? 500 : 200;
+  const STEP        = legalMode ? 400 : 150;
+  const MAX_WINDOWS = legalMode ? 60 : 40;
+  const finalMaxPassages = legalMode ? Math.max(maxPassages, 8) : maxPassages;
+  const finalMaxChars    = legalMode ? Math.max(maxChars, 12_000) : maxChars;
 
   const text = await fetchCleanText(url, timeoutMs);
   if (!text || text.length < 50) return undefined;
 
-  const WINDOW     = 200;
-  const STEP       = 150; // non-overlap stride (200 - 50 overlap)
-  const MAX_WINDOWS = 40; // cap memory use on very long docs (50k+ words)
-
   let wins = passages(text, WINDOW, WINDOW - STEP);
   if (wins.length === 0) return undefined;
-  // Sample evenly across document if too many windows
   if (wins.length > MAX_WINDOWS) {
     const step = Math.floor(wins.length / MAX_WINDOWS);
     wins = wins.filter((_, i) => i % step === 0).slice(0, MAX_WINDOWS);
   }
 
-  // Score all windows
-  const scores  = bm25Scores(query, wins);
+  const scores = bm25Scores(query, wins);
+  const jurisBoost = jurisdictionBoost(url, legalMode);
+  const queryCitations = legalMode ? legalCitations(query) : [];
 
-  // Pair each window with its score and position index
-  const indexed = wins.map((w, i) => ({ text: w, score: scores[i], pos: i }));
+  const indexed = wins.map((w, i) => {
+    let score = scores[i] * jurisBoost;
 
-  // Filter below threshold
+    if (legalMode && queryCitations.length > 0) {
+      const passageCitations = legalCitations(w);
+      const citationOverlap = passageCitations.filter((c) =>
+        queryCitations.some((qc) => qc.toLowerCase() === c.toLowerCase())
+      ).length;
+      score += citationOverlap * 0.15;
+    }
+
+    return { text: w, score, pos: i };
+  });
+
   const relevant = indexed.filter((w) => w.score >= minScore);
   if (relevant.length === 0) {
-    // Nothing relevant found — fall back to first passage
-    return truncateToWord(wins[0], maxChars);
+    return truncateToWord(wins[0], finalMaxChars);
   }
 
-  // Non-maximum suppression: greedy selection in score-descending order.
-  // Windows with STEP=150 words overlap when their indices differ by < 2
-  // (pos 0 = words 0–199, pos 1 = words 150–349 → 50-word overlap).
-  // Using < 2 ensures adjacent windows don't both get selected.
   const sorted  = [...relevant].sort((a, b) => b.score - a.score);
   const selected: typeof sorted = [];
+  const nmsThreshold = legalMode ? 1 : 2;
   for (const candidate of sorted) {
-    const overlaps = selected.some((s) => Math.abs(s.pos - candidate.pos) < 2);
+    const overlaps = selected.some((s) => Math.abs(s.pos - candidate.pos) < nmsThreshold);
     if (!overlaps) selected.push(candidate);
-    if (selected.length >= maxPassages) break;
+    if (selected.length >= finalMaxPassages) break;
   }
 
-  // Re-sort by document position for coherent reading order
   selected.sort((a, b) => a.pos - b.pos);
 
-  // Join and cap
   let joined = selected.map((w) => w.text).join("\n\n");
-  if (joined.length > maxChars) {
-    joined = truncateToWord(joined, maxChars);
+  if (joined.length > finalMaxChars) {
+    joined = truncateToWord(joined, finalMaxChars);
   }
   return joined;
 }
 
-/**
- * Enrich top-N results with full relevant content fetched in parallel.
- * Populates result.content (does NOT replace snippet).
- * Results with no fetchable content keep content undefined.
- */
-// URLs that redirect to content behind a login or JS wall — fetching yields nothing useful.
 const UNFETCHABLE_PATTERNS = [
   /news\.google\.com\/rss\/articles\//,
   /news\.google\.com\/stories\//,
@@ -278,7 +266,6 @@ export async function enrichContents<T extends { url: string; content?: string }
   query     = "",
   options?: Parameters<typeof fetchRelevantContent>[2]
 ): Promise<T[]> {
-  // Only attempt to fetch URLs that are not known redirect walls
   const targets  = results.slice(0, topN);
   const deadline = Date.now() + timeoutMs;
   const fetched  = await Promise.all(
@@ -292,4 +279,17 @@ export async function enrichContents<T extends { url: string; content?: string }
     if (content) results[i].content = content;
   });
   return results;
+}
+
+/**
+ * Legal-aware content enrichment — uses 500-word windows, 12000-char cap,
+ * jurisdiction-aware BM25 boost, and citation-aware passage scoring.
+ */
+export async function enrichContentsLegal<T extends { url: string; content?: string }>(
+  results:  T[],
+  topN      = 3,
+  timeoutMs = 8_000,
+  query     = "",
+): Promise<T[]> {
+  return enrichContents(results, topN, timeoutMs, query, { legalMode: true });
 }
