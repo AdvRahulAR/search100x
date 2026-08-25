@@ -42,7 +42,6 @@ export { GoogleNewsEngine } from "./adapters/googlenews.js";
 export { BingNewsEngine } from "./adapters/bingnews.js";
 export { WikipediaEngine } from "./adapters/wikipedia.js";
 export { OpenAlexEngine } from "./adapters/openalex.js";
-export { BraveEngine } from "./adapters/brave.js";
+export { BraveEngine, BraveFreeEngine } from "./adapters/brave.js";
 export { TavilyEngine } from "./adapters/tavily.js";
 export { GoogleEngine } from "./adapters/google.js";
-
