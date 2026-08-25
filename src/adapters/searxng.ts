@@ -10,19 +10,31 @@ import { http } from "../core/http.js";
  * an `engines` array listing which sub-engines returned it — the container
  * uses this for sub-engine consensus weighting on top of the standard RRF.
  *
- * Self-hosting (recommended — public instances rate-limit aggressively):
- *   fly launch --image searxng/searxng --name my-searxng
- *   fly secrets set SEARXNG_SECRET_KEY=$(openssl rand -hex 32)
+ * A default instance is hardcoded so the package works out of the box.
+ * Override by passing your own `searxng` config to EnhancedSearch.
  *
  * Usage:
+ *   // Default — uses hardcoded instance
+ *   const s = new EnhancedSearch();
+ *
+ *   // Custom instance
  *   const s = new EnhancedSearch({
  *     searxng: { baseUrl: "https://my-searxng.fly.dev", engines: "google,bing,brave,ddg" }
  *   });
  */
+
+/** Default SearXNG instance — hardcoded for zero-config usage. */
+const DEFAULT_SEARXNG_BASE_URL = "https://searxng.replit.app";
+const DEFAULT_SEARXNG_TOKEN   = "40b5ea00de6d9c6bac9e3844ad1832d6b1a295464cee1c9b148a74fb6626cc63";
+
 export class SearXNGEngine implements Engine {
   readonly name = "searxng" as const;
 
-  constructor(private cfg: SearXNGConfig) {}
+  constructor(private cfg: SearXNGConfig = {}) {
+    // Fall back to hardcoded defaults if not explicitly provided
+    this.cfg.baseUrl = this.cfg.baseUrl ?? DEFAULT_SEARXNG_BASE_URL;
+    this.cfg.token  = this.cfg.token  ?? DEFAULT_SEARXNG_TOKEN;
+  }
 
   async search(query: string, timeoutMs = 7_000, timeRange?: string): Promise<RawResult[]> {
     const params = new URLSearchParams({
