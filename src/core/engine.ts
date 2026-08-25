@@ -40,4 +40,7 @@ export const ENGINE_TIMEOUTS: Record<string, number> = {
   yep:        4_000,
   // Two sequential HTTP calls (geocode + weather) — needs generous budget
   openmeteo:  6_000,
+  // Indian legal sources — government sites can be slow
+  indiacode:  5_000,
+  sebi:       4_000,
 };
