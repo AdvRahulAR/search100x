@@ -4,7 +4,7 @@ import { domainReputation, spamSignalScore } from "./reputation.js";
 // ── Authority scoring ─────────────────────────────────────────────────────────
 
 const GOV_EDU = /\.(gov|edu|ac\.[a-z]{2,4})$/;
-const TRUSTED  = /wikipedia\.org|reuters\.com|bbc\.(com|co\.uk)|arxiv\.org|pubmed\.ncbi|nature\.com|science\.org/;
+const TRUSTED  = /wikipedia\.org|reuters\.com|bbc\.(com|co\.uk)|arxiv\.org|pubmed\.ncbi|nature\.com|science\.org|indiankanoon\.org|main\.sci\.gov\.in|sci\.gov\.in|indiacode\.nic\.in/;
 const ORG      = /\.org$/;
 
 /** Heuristic domain trust score in [0, 1]. Pure URL parsing, zero network cost. */
@@ -192,4 +192,3 @@ export function normaliseScores(scores: number[], engineCount = 3): number[] {
   const beta = SIGMOID_BETA;
   return scores.map(x => 1 / (1 + Math.exp(-(x - mu) / beta)));
 }
-
