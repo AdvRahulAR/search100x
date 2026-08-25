@@ -10,7 +10,7 @@ export interface HttpResponse {
   data: any;
 }
 
-class HttpError extends Error {
+export class HttpError extends Error {
   constructor(public status: number) {
     super(`HTTP ${status}`);
   }
