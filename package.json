@@ -1,6 +1,7 @@
+// package.json
 {
   "name": "search100x",
-  "version": "2.2.1",
+  "version": "2.3.1",
   "description": "Multi-source web search for LLM grounding — works with any model provider",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -28,26 +29,10 @@
     "LICENSE"
   ],
   "keywords": [
-    "search",
-    "web-search",
-    "llm",
-    "llm-grounding",
-    "rag",
-    "ai-agent",
-    "langchain",
-    "vercel-ai",
-    "claude",
-    "openai",
-    "sarvam",
-    "hermes",
-    "legal",
-    "india-legal",
-    "rrf",
-    "bm25",
-    "citations",
-    "brave",
-    "tavily",
-    "wikipedia"
+    "search", "web-search", "llm", "llm-grounding", "rag", "ai-agent",
+    "langchain", "vercel-ai", "claude", "openai", "sarvam", "hermes",
+    "legal", "india-legal", "rrf", "bm25", "citations", "brave",
+    "tavily", "wikipedia"
   ],
   "author": "Rahul - Dharmabot AI",
   "license": "MIT",
