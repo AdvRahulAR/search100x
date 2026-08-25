@@ -21,7 +21,7 @@ import { GoogleNewsEngine } from "./adapters/googlenews.js";
 import { BingNewsEngine }   from "./adapters/bingnews.js";
 import { WikipediaEngine }  from "./adapters/wikipedia.js";
 import { OpenAlexEngine }   from "./adapters/openalex.js";
-import { BraveEngine }      from "./adapters/brave.js";
+import { BraveEngine, BraveFreeEngine } from "./adapters/brave.js";
 import { TavilyEngine }     from "./adapters/tavily.js";
 import { GoogleEngine }     from "./adapters/google.js";
 import { SearXNGEngine }    from "./adapters/searxng.js";
@@ -43,12 +43,6 @@ interface EngineEntry {
   variant: QueryVariant;
 }
 
-/**
- * Per-engine timeout wrapper using a shared deadline.
- * The deadline is `Date.now() + totalMs` computed once per search().
- * Each engine gets the REMAINING budget, not the full timeout — fast engines
- * don't inflate the wait time for the overall response.
- */
 function withDeadline<T>(promise: Promise<T>, remainingMs: number, label: string, logger?: Logger): Promise<T | null> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -60,27 +54,6 @@ function withDeadline<T>(promise: Promise<T>, remainingMs: number, label: string
   });
 }
 
-/**
- * EnhancedSearch orchestrator
- * ────────────────────────────
- * Per-request execution model:
- *  1. Cache check — return immediately if query+sources seen within TTL
- *  2. Build query bundle (primary / recent / scoped, timeRange, page)
- *  3. Select active engines; skip those whose circuit breaker is OPEN
- *  4. Run all engines in parallel using a shared deadline budget
- *     When scopedDomains are set, free engines also run the scoped variant
- *  5. Feed results into ResultContainer (merge by URL-hash, BM25+RRF blend)
- *  6. Optionally enrich top-N snippets by fetching actual page content
- *  7. Cache and return
- *
- * Engine instances are created ONCE in the constructor and reused across
- * calls — this enables per-engine state (VQD cache, connection reuse).
- *
- * Plugin API:
- *   s.use(engine)        — register custom engine
- *   s.remove("mojeek")   — disable a built-in engine
- *   s.metrics()          — circuit breaker state per engine
- */
 export class EnhancedSearch {
   private config:     SearchConfig;
   private cache:      IResultCache;
@@ -98,9 +71,6 @@ export class EnhancedSearch {
     this.engineMap = this.initEngines();
   }
 
-
-  // ── Plugin API ────────────────────────────────────────────────────────────
-
   use(engine: Engine): this {
     this.plugins.push(engine);
     return this;
@@ -114,8 +84,6 @@ export class EnhancedSearch {
   metrics(): Record<string, { state: string; failures: number }> {
     return this.circuit.status();
   }
-
-  // ── Batch search ──────────────────────────────────────────────────────────
 
   async search(query: string, options: SearchOptions = {}): Promise<SearchResponse> {
     const {
@@ -154,23 +122,17 @@ export class EnhancedSearch {
 
     const bundle    = buildQueryBundle(query, scopedDomains, resolvedTimeRange, page);
     const weights   = SCORING_PRESETS[preset] ?? DEFAULT_WEIGHTS;
-    // Legal/academic content stays valid for years; news decays in a few days (3 days); general default is 30 days
     const halfLife  = preset === "legal" || preset === "academic" ? 365 : (preset === "news" ? 3 : 30);
     const container = new ResultContainer(query);
 
-    // Live-data intent: detect weather/stocks/time queries and restrict engines
-    // to real-data sources + news only. Avoids Wikipedia/web-scraper noise.
     const liveIntent = detectLiveIntent(query);
     let activeEntries = entries;
 
     const tasks: Promise<void>[] = [];
 
-    // pinnedResult: real-data result that always appears at rank 1 regardless of scoring
     let pinnedResult: SearchResult | null = null;
 
     if (liveIntent === "weather") {
-      // Run OpenMeteo FIRST with a dedicated full budget — it makes two sequential
-      // HTTP calls (geocode → weather) so it needs time before other engines consume the deadline.
       const weatherEngine = new OpenMeteoEngine();
       const weatherTimeout = ENGINE_TIMEOUTS["openmeteo"] ?? 6_000;
       const weatherResult = await withDeadline(
@@ -180,7 +142,6 @@ export class EnhancedSearch {
         this.logger
       );
       if (weatherResult !== null && weatherResult.length > 0) {
-        // Pin this result to rank 1 — real-time data always wins over indexed pages
         pinnedResult = {
           title:       weatherResult[0].title,
           url:         weatherResult[0].url,
@@ -190,13 +151,11 @@ export class EnhancedSearch {
           publishedAt: weatherResult[0].publishedAt,
         };
       }
-      // Restrict remaining engines to news only — suppress web scrapers and Wikipedia
       activeEntries = entries.filter(e =>
         (["googlenews", "bingnews", "tavily", "brave", "google"] as string[]).includes(e.engine.name)
       );
     }
 
-    // Main query tasks
     activeEntries.forEach(({ engine, variant }) => {
       tasks.push((async () => {
         if (this.circuit.isOpen(engine.name)) {
@@ -220,13 +179,12 @@ export class EnhancedSearch {
       })());
     });
 
-    // Multi-variant query fan-out tasks
     const shouldReformulate = options.reformulate ?? false;
     const extraQueries = shouldReformulate ? reformulateQuery(query).slice(1) : [];
 
     extraQueries.forEach((eq) => {
       const eqBundle = buildQueryBundle(eq, scopedDomains, resolvedTimeRange, page);
-      const freeWebEngines = ["duckduckgo", "bing", "mojeek"];
+      const freeWebEngines = ["duckduckgo", "bing", "mojeek", "brave"];
       const activeFreeEntries = entries.filter(e => freeWebEngines.includes(e.engine.name));
 
       activeFreeEntries.forEach(({ engine, variant }) => {
@@ -256,11 +214,9 @@ export class EnhancedSearch {
 
     await Promise.all(tasks);
 
-    // Fetch more candidates than limit when reranking so CE has enough to work with
     const fetchLimit = rerank ? Math.max(limit, rerankCandidates) : limit;
     let results = container.getResults(fetchLimit, weights, halfLife);
 
-    // Prepend pinned live-data result (e.g. OpenMeteo) — real-time data always leads
     if (pinnedResult) {
       results = [pinnedResult, ...results.filter(r => r.url !== pinnedResult!.url)];
     }
@@ -273,7 +229,6 @@ export class EnhancedSearch {
       results = await enrichContents(results, enrichContent, Math.min(totalTimeout, 8_000), query);
     }
 
-    // Cross-encoder re-ranking (opt-in — requires onnxruntime-node + model)
     if (rerank && results.length > 0) {
       results = await rerankResults(query, results, rerankCandidates);
     }
@@ -288,13 +243,6 @@ export class EnhancedSearch {
     return this.toResponse(query, results, Date.now() - (deadline - totalTimeout));
   }
 
-  // ── Streaming search ──────────────────────────────────────────────────────
-
-  /**
-   * Yields result snapshots as each engine completes — in COMPLETION ORDER,
-   * not declaration order.  Fast engines surface results immediately; slow
-   * engines don't block the stream.
-   */
   async *searchStream(
     query:   string,
     options: SearchOptions = {}
@@ -309,8 +257,6 @@ export class EnhancedSearch {
     const entries      = this.buildEntries(options.sources, scopedDomains);
     const container    = new ResultContainer(query);
 
-    // Each job resolves to its own index when complete (success or timeout).
-    // This lets us race them in completion order below.
     const jobs = entries.map(({ engine, variant }, i) =>
       (async (): Promise<number> => {
         if (!this.circuit.isOpen(engine.name)) {
@@ -329,19 +275,16 @@ export class EnhancedSearch {
           }
         }
         return i;
-      })().catch(() => i) // never let a job crash the generator
+      })().catch(() => i)
     );
 
-    // Track which engines have reported results
     const completed = new Set<number>();
 
     while (completed.size < jobs.length) {
-      // Race all remaining jobs
       const pending = jobs
         .map((p, i) => ({ promise: p, index: i }))
         .filter(({ index }) => !completed.has(index));
       
-      // Wait for next completion
       const winner = await Promise.race(
         pending.map(({ promise, index }) => 
           promise.then(() => index)
@@ -354,8 +297,6 @@ export class EnhancedSearch {
     }
   }
 
-  // ── Internals ─────────────────────────────────────────────────────────────
-
   private toResponse(
     query: string,
     results: SearchResult[],
@@ -365,7 +306,6 @@ export class EnhancedSearch {
     return { query, results, count: results.length, sources: srcNames, durationMs };
   }
 
-  /** Create one engine instance per built-in source. Called once in constructor. */
   private initEngines(): Map<SourceName, Engine> {
     const { newsRegion = DEFAULT_REGION, braveApiKey, tavilyApiKey, googleApiKey, googleCx } = this.config;
     const m = new Map<SourceName, Engine>();
@@ -382,10 +322,9 @@ export class EnhancedSearch {
 
     if (tavilyApiKey)              m.set("tavily",    new TavilyEngine(tavilyApiKey));
     if (braveApiKey)               m.set("brave",     new BraveEngine(braveApiKey));
+    else                           m.set("brave",     new BraveFreeEngine());
     if (googleApiKey && googleCx)  m.set("google",    new GoogleEngine(googleApiKey, googleCx));
-    if (this.config.searxng)       m.set("searxng",   new SearXNGEngine(this.config.searxng));
-    // openmeteo is instantiated on-demand inside search() for weather queries only
-    // — not registered here so it doesn't run on every non-weather query
+    m.set("searxng", new SearXNGEngine(this.config.searxng ?? {}));
 
     return m;
   }
@@ -422,10 +361,9 @@ export class EnhancedSearch {
       engine: e, variant: "primary" as QueryVariant,
     }));
 
-    // Parallel scoped variant for free web engines when scopedDomains provided
     const scopedEntries: EngineEntry[] = [];
     if (scopedDomains && scopedDomains.length > 0 && !requested) {
-      const freeWeb: SourceName[] = ["duckduckgo", "bing", "mojeek"];
+      const freeWeb: SourceName[] = ["duckduckgo", "bing", "mojeek", "brave"];
       for (const entry of base) {
         if (freeWeb.includes(entry.engine.name as SourceName)) {
           scopedEntries.push({ engine: entry.engine, variant: "scoped" });
