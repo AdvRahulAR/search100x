@@ -75,3 +75,6 @@ export const http = {
   post: (url: string | URL, body: unknown, opts?: Parameters<typeof request>[2]) =>
     request("POST", url, { ...opts, body }),
 };
+
+// Re-export SSRF guard for convenience
+export { isSsrfSafe } from "./security.js";
