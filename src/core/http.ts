@@ -1,16 +1,18 @@
 /**
  * Thin wrapper around native fetch. Drops the axios dependency while keeping
- * the { data } response shape that all adapters expect.
+ * the { data } response shape that adapters expect.
  *
- * Throws HttpError (with .response.status) on non-2xx — matches the subset of
- * AxiosError that adapters actually check (wikipedia retry uses status === 429).
+ * Supports a 3-second default timeout via AbortController, JSON and text
+ * response types, and query-string params.
  */
 
-export class HttpError extends Error {
-  response: { status: number };
-  constructor(status: number) {
+export interface HttpResponse {
+  data: any;
+}
+
+class HttpError extends Error {
+  constructor(public status: number) {
     super(`HTTP ${status}`);
-    this.response = { status };
   }
 }
 
@@ -46,6 +48,17 @@ async function request(
       redirect: "follow",
     });
 
+    // Detect redirects — useful for debugging CAPTCHA/bot-detection walls
+    // that return 302 redirects instead of blocking outright.
+    if (res.redirected) {
+      // Silently note — log via console.warn so it appears in debug but doesn't break
+      const originalHost = u.hostname;
+      const finalHost = new URL(res.url).hostname;
+      if (originalHost !== finalHost) {
+        console.warn(`[search100x] ${method} ${originalHost} redirected to ${finalHost} — possible bot detection`);
+      }
+    }
+
     if (!res.ok) throw new HttpError(res.status);
 
     const data =
@@ -57,14 +70,8 @@ async function request(
 }
 
 export const http = {
-  get: (
-    url: string | URL,
-    opts: Omit<Parameters<typeof request>[2], "body"> = {}
-  ) => request("GET", url, opts),
-
-  post: (
-    url: string,
-    body: unknown,
-    opts: Omit<Parameters<typeof request>[2], "body" | "params"> = {}
-  ) => request("POST", url, { ...opts, body }),
+  get: (url: string | URL, opts?: Parameters<typeof request>[2]) =>
+    request("GET", url, opts),
+  post: (url: string | URL, body: unknown, opts?: Parameters<typeof request>[2]) =>
+    request("POST", url, { ...opts, body }),
 };
