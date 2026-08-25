@@ -15,7 +15,13 @@ export const DOMAIN_PRESETS: Record<string, string[]> = {
     "trai.gov.in",
     "meity.gov.in",
     "supremecourt.gov.in",
+    "main.sci.gov.in",
+    "sci.gov.in",
     "legislative.gov.in",
+    "indiankanoon.org",
+    "ibbi.gov.in",
+    "ncbc.gov.in",
+    "gst.gov.in",
   ],
   "us-legal": [
     "law.cornell.edu",
@@ -87,6 +93,13 @@ export const SYNONYMS: Record<string, string[]> = {
   "fine":          ["penalty", "sanction", "enforcement"],
   "gdpr":          ["data protection regulation", "dsgvo"],
   "ai act":        ["artificial intelligence act", "eu ai regulation"],
+  // Indian legal
+  "ipc":           ["indian penal code", "bharatiya nyaya sanhita"],
+  "crpc":          ["code of criminal procedure", "bharatiya nagarik suraksha sanhita"],
+  "fir":           ["first information report", "police complaint"],
+  "498a":          ["dowry harassment", "cruelty by husband"],
+  "bns":           ["bharatiya nyaya sanhita", "indian penal code"],
+  "bnss":          ["bharatiya nagarik suraksha sanhita", "code of criminal procedure"],
   // Technical
   "transformer":   ["attention mechanism", "self-attention"],
   "llm":           ["large language model", "language model", "foundation model"],
