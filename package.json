@@ -1,0 +1,86 @@
+{
+  "name": "search100x",
+  "version": "3.1.0",
+  "description": "Multi-source web search for LLM grounding \u2014 works with any model provider",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "bin": {
+    "search100x": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "npm run build && node --test tests/*.test.js",
+    "test:mock": "npm run build && node --test tests/mocks/*.test.js",
+    "dev": "tsc --watch",
+    "docs": "typedoc --out docs/api src/index.ts"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "search",
+    "web-search",
+    "llm",
+    "llm-grounding",
+    "rag",
+    "ai-agent",
+    "langchain",
+    "vercel-ai",
+    "claude",
+    "openai",
+    "sarvam",
+    "hermes",
+    "legal",
+    "india-legal",
+    "rrf",
+    "bm25",
+    "citations",
+    "brave",
+    "tavily",
+    "wikipedia",
+    "searxng",
+    "simhash",
+    "ssrf",
+    "trafilatura",
+    "indiacode",
+    "sebi",
+    "mcp-server"
+  ],
+  "author": "Rahul - Dharmabot AI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AdvRahulAR/search100x.git"
+  },
+  "homepage": "https://github.com/AdvRahulAR/search100x#readme",
+  "bugs": {
+    "url": "https://github.com/AdvRahulAR/search100x/issues"
+  },
+  "dependencies": {
+    "node-html-parser": "^6.1.0"
+  },
+  "optionalDependencies": {
+    "express": "^4.18.0",
+    "unpdf": "^0.12.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.0",
+    "@types/nock": "^10.0.3",
+    "@types/node": "^20.0.0",
+    "nock": "^14.0.15",
+    "tsup": "^8.5.1",
+    "typedoc": "^0.28.19",
+    "typescript": "^5.4.0"
+  },
+  "module": "dist/index.js"
+}

@@ -1,0 +1,7 @@
+{
+  "entryPoints": ["src/index.ts"],
+  "out": "docs/api",
+  "name": "search100x API Documentation",
+  "excludeExternals": true,
+  "theme": "default"
+}
