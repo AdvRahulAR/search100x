@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [2.2.1] - 2026-06-19
+## [3.1.1] - 2026-08-26
+
+### Fixed
+- **Early-return thresholding**: Resolved premature search resolution by counting only successful non-empty engine responses toward `minEngines`.
+- **SearXNG Priority & Consensus**: Elevated SearXNG to Tier 1 with 1.30 weight and multi-engine consensus boosting (`subEngines`).
+- **Title BM25 relevance**: Enhanced `ResultContainer` to score both titles and body snippets, giving 2x weight to title keyword precision.
+- **Publication Date extraction**: Attached parsed `publishedAt` objects in `GoogleNewsEngine` and `BingNewsEngine` for recency decay.
+- **CLI tuning flags**: Added `--min-engines`, `--max-wait`, `--deep`, and `--no-early-return` options.
+
+---
 
 ### Changed
 - Structured logging via `core/logger.ts` — all engine and cache events now emit JSON-compatible log lines
