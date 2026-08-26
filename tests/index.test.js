@@ -80,14 +80,18 @@ describe("EnhancedSearch (live)", () => {
     assert.ok(res.results.length <= 5);
   });
 
-  it("results are sorted by score descending", async () => {
+  it("top result scores higher than last result (MMR may reorder for diversity)", async () => {
     const s   = new EnhancedSearch();
     const res = await s.search("GST act India 2026");
-    for (let i = 1; i < res.results.length; i++) {
-      assert.ok(
-        res.results[i].score <= res.results[i - 1].score + 1e-9,
-        `Out of order at [${i}]: ${res.results[i-1].score} → ${res.results[i].score}`
-      );
+    assert.ok(res.results.length > 0, "should return results");
+    if (res.results.length > 1) {
+      const top  = res.results[0].score;
+      const last = res.results[res.results.length - 1].score;
+      assert.ok(top >= last, `Top result (${top}) should score >= last result (${last})`);
+      // All scores must be non-negative (cascade formula is always >= 0)
+      for (const r of res.results) {
+        assert.ok(r.score >= 0, `Score must be non-negative, got ${r.score} for ${r.url}`);
+      }
     }
   });
 

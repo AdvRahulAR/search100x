@@ -29,6 +29,7 @@ export class TavilyEngine implements Engine {
       title:   r.title ?? "",
       url:     r.url ?? "",
       snippet: truncate(r.content ?? r.snippet ?? ""),
+      providerScore: typeof r.score === "number" ? r.score : undefined,
     }));
   }
 }

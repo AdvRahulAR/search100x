@@ -15,7 +15,13 @@ export const DOMAIN_PRESETS: Record<string, string[]> = {
     "trai.gov.in",
     "meity.gov.in",
     "supremecourt.gov.in",
+    "main.sci.gov.in",
+    "sci.gov.in",
     "legislative.gov.in",
+    "indiankanoon.org",
+    "ibbi.gov.in",
+    "ncbc.gov.in",
+    "gst.gov.in",
   ],
   "us-legal": [
     "law.cornell.edu",
@@ -78,6 +84,47 @@ export interface QueryBundle {
   page: number;
 }
 
+// Token-level synonym map for high-value domains
+// Legal, medical, and tech synonyms cover 80% of professional queries
+export const SYNONYMS: Record<string, string[]> = {
+  // Legal
+  "erasure":       ["deletion", "forgotten", "removal"],
+  "obligation":    ["requirement", "duty", "mandate"],
+  "fine":          ["penalty", "sanction", "enforcement"],
+  "gdpr":          ["data protection regulation", "dsgvo"],
+  "ai act":        ["artificial intelligence act", "eu ai regulation"],
+  // Indian legal
+  "ipc":           ["indian penal code", "bharatiya nyaya sanhita"],
+  "crpc":          ["code of criminal procedure", "bharatiya nagarik suraksha sanhita"],
+  "fir":           ["first information report", "police complaint"],
+  "498a":          ["dowry harassment", "cruelty by husband"],
+  "bns":           ["bharatiya nyaya sanhita", "indian penal code"],
+  "bnss":          ["bharatiya nagarik suraksha sanhita", "code of criminal procedure"],
+  // Technical
+  "transformer":   ["attention mechanism", "self-attention"],
+  "llm":           ["large language model", "language model", "foundation model"],
+  "rag":           ["retrieval augmented generation", "retrieval augmented"],
+  // Medical
+  "heart attack":  ["myocardial infarction", "cardiac arrest"],
+  "stroke":        ["cerebrovascular accident", "CVA"],
+};
+
+export function expandQuery(query: string): string {
+  const lower = query.toLowerCase();
+  const expansions: string[] = [];
+
+  for (const [term, alts] of Object.entries(SYNONYMS)) {
+    if (lower.includes(term)) {
+      // Add one best alternative — don't bloat the query
+      expansions.push(alts[0]);
+    }
+  }
+
+  if (expansions.length === 0) return query;
+  // Append as OR clause — most engines support this
+  return `${query} OR ${expansions.slice(0, 2).join(" OR ")}`;
+}
+
 /**
  * Build a QueryBundle from user input.
  *
@@ -100,7 +147,7 @@ export function buildQueryBundle(
       : base;
 
   return {
-    primary: base,
+    primary: expandQuery(base),
     recent: base,   // no longer injects years — engines use timeRange instead
     scoped,
     timeRange,

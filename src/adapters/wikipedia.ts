@@ -13,7 +13,7 @@ async function fetchWithRetry(url: string, timeoutMs: number, attempt = 0): Prom
       snippet: truncate(stripHtml(r.snippet ?? "")),
     }));
   } catch (err) {
-    if ((err as HttpError)?.response?.status === 429 && attempt < 2) {
+    if (err instanceof HttpError && err.status === 429 && attempt < 2) {
       await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
       return fetchWithRetry(url, timeoutMs, attempt + 1);
     }

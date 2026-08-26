@@ -1,3 +1,5 @@
+import { Logger } from "./types.js";
+
 /**
  * Per-engine circuit breaker.
  *
@@ -13,7 +15,8 @@
 
 const FAILURE_THRESHOLD = 3;
 const WINDOW_MS         = 60_000;      // 1-minute rolling failure window
-const COOLDOWN_MS       = 5 * 60_000; // 5 minutes before HALF_OPEN trial
+const MAX_COOLDOWN_MS   = 10 * 60_000; // 10 minutes max cooldown
+const BASE_COOLDOWN_MS  = 30_000;      // 30s initial cooldown (exponential backoff)
 
 export type BreakerState = "CLOSED" | "OPEN" | "HALF_OPEN";
 
@@ -22,10 +25,13 @@ interface Breaker {
   failures:            number[];  // timestamps of recent failures
   openedAt:            number;
   halfOpenTrialActive: boolean;
+  consecutiveOpens:    number;  // for exponential backoff calculation
 }
 
 export class CircuitBreakerRegistry {
   private breakers = new Map<string, Breaker>();
+
+  constructor(private logger?: Logger) {}
 
   private get(engine: string): Breaker {
     if (!this.breakers.has(engine)) {
@@ -34,6 +40,7 @@ export class CircuitBreakerRegistry {
         failures: [],
         openedAt: 0,
         halfOpenTrialActive: false,
+        consecutiveOpens: 0,
       });
     }
     return this.breakers.get(engine)!;
@@ -45,7 +52,12 @@ export class CircuitBreakerRegistry {
     if (b.state === "CLOSED") return false;
 
     if (b.state === "OPEN") {
-      if (Date.now() - b.openedAt >= COOLDOWN_MS) {
+      // Exponential backoff: 30s, 60s, 120s, 240s, ... max 10min
+      const cooldown = Math.min(
+        BASE_COOLDOWN_MS * Math.pow(2, b.consecutiveOpens - 1),
+        MAX_COOLDOWN_MS
+      );
+      if (Date.now() - b.openedAt >= cooldown) {
         b.state = "HALF_OPEN";
         b.halfOpenTrialActive = false;
         return false;
@@ -65,6 +77,7 @@ export class CircuitBreakerRegistry {
     b.failures = [];
     b.openedAt = 0;
     b.halfOpenTrialActive = false;
+    b.consecutiveOpens = 0;  // reset backoff on success
   }
 
   recordFailure(engine: string): void {
@@ -79,11 +92,17 @@ export class CircuitBreakerRegistry {
       b.state = "OPEN";
       b.openedAt = now;
       b.halfOpenTrialActive = false;
-      console.warn(
-        `[circuit] ${engine} tripped OPEN (${b.failures.length} failures in ${WINDOW_MS / 1000}s)`
+      b.consecutiveOpens++;
+      const cooldown = Math.min(
+        BASE_COOLDOWN_MS * Math.pow(2, b.consecutiveOpens - 1),
+        MAX_COOLDOWN_MS
+      );
+      this.logger?.warn(
+        `[circuit] ${engine} tripped OPEN (${b.failures.length} failures, cooldown=${Math.round(cooldown / 1000)}s)`
       );
     }
   }
+
 
   status(): Record<string, { state: BreakerState; failures: number }> {
     const out: Record<string, { state: BreakerState; failures: number }> = {};

@@ -31,8 +31,11 @@ function decodeBingUrl(href: string): string {
     const uParam = u.searchParams.get("u");
     if (!uParam?.startsWith("a1")) return href;
     const encoded = uParam.slice(2);
-    const padded  = encoded + "=".repeat((4 - (encoded.length % 4)) % 4);
-    const decoded = Buffer.from(padded, "base64url").toString("utf-8");
+    // Cross-runtime base64url decode (works in Node.js and Deno)
+    // base64url uses '-' and '_' instead of '+' and '/'
+    const b64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const decoded = atob(padded);
     // Validate decoded value is a real URL before returning
     new URL(decoded);
     return decoded;

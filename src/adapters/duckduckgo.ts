@@ -1,6 +1,6 @@
 import { parse } from "node-html-parser";
 import { Engine } from "../core/engine.js";
-import { RawResult } from "../core/types.js";
+import { RawResult, Logger } from "../core/types.js";
 import { stripHtml, truncate } from "../core/normalizer.js";
 import { http } from "../core/http.js";
 
@@ -19,10 +19,10 @@ import { http } from "../core/http.js";
  *    title:   h2 a (text + href is the real URL, not a redirect)
  *    snippet: a.result__snippet
  *
- *  CAPTCHA: form#challenge-form present → return []
+ *  CAPTCHA: form#challenge-form present → retry after 2s delay
  *
- * UA must be static — DDG ties VQD to the User-Agent used for the initial
- * page-1 request.  Changing UA between page-1 and page-2 invalidates VQD.
+ *  UA must be static — DDG ties VQD to the User-Agent used for the initial
+ *  page-1 request.  Changing UA between page-1 and page-2 invalidates VQD.
  */
 
 const DDG_URL    = "https://html.duckduckgo.com/html/";
@@ -47,9 +47,9 @@ const DDG_HEADERS = {
 
 export class DuckDuckGoEngine implements Engine {
   readonly name = "duckduckgo" as const;
-  // Instance-level VQD cache — isolated per EnhancedSearch instance,
-  // no cross-request interference in multi-instance deployments.
   private vqdCache = new Map<string, { vqd: string; expiresAt: number }>();
+
+  constructor(private logger?: Logger) {}
 
   private getCachedVqd(query: string): string | undefined {
     const entry = this.vqdCache.get(query);
@@ -61,7 +61,6 @@ export class DuckDuckGoEngine implements Engine {
   }
 
   private cacheVqd(query: string, vqd: string): void {
-    // Evict oldest entry when at capacity
     if (this.vqdCache.size >= VQD_MAX) {
       const oldest = [...this.vqdCache.entries()].reduce((a, b) =>
         a[1].expiresAt < b[1].expiresAt ? a : b
@@ -90,8 +89,7 @@ export class DuckDuckGoEngine implements Engine {
     } else {
       const vqd = this.getCachedVqd(query);
       if (!vqd) {
-        // Cannot paginate safely without VQD — DDG blocks requests without it
-        console.warn("[duckduckgo] no cached VQD for pagination — skipping page", page);
+        this.logger?.warn(`[duckduckgo] no cached VQD for pagination — skipping page ${page}`);
         return [];
       }
       form.set("vqd", vqd);
@@ -99,7 +97,7 @@ export class DuckDuckGoEngine implements Engine {
       form.set("api", "d.js");
       form.set("o", "json");
       form.set("v", "l");
-      const offset = 10 + (page - 2) * 15; // page 2→10, page 3→25 …
+      const offset = 10 + (page - 2) * 15;
       form.set("dc", String(offset + 1));
       form.set("s", String(offset));
     }
@@ -107,18 +105,51 @@ export class DuckDuckGoEngine implements Engine {
     const res = await http.post(DDG_URL, form.toString(), {
       timeout: timeoutMs,
       headers: DDG_HEADERS,
+      responseType: "text",
     });
 
     const html = res.data as string;
     const root = parse(html);
 
-    // CAPTCHA guard
+    // CAPTCHA guard — retry once after a short delay, then give up gracefully.
+    // CAPTCHAs are often transient rate-limit signals, not hard blocks.
+    // We return an empty array (not an error) so the circuit breaker doesn't trip.
     if (root.querySelector("form#challenge-form")) {
-      console.warn("[duckduckgo] CAPTCHA detected — returning empty results");
-      return [];
+      this.logger?.warn("[duckduckgo] CAPTCHA detected — retrying after 2s delay");
+      await new Promise((r) => setTimeout(r, 2000));
+
+      const retryRes = await http.post(DDG_URL, form.toString(), {
+        timeout: Math.max(1000, timeoutMs - 2000),
+        headers: DDG_HEADERS,
+        responseType: "text",
+      });
+      const retryHtml = retryRes.data as string;
+      const retryRoot = parse(retryHtml);
+
+      if (retryRoot.querySelector("form#challenge-form")) {
+        this.logger?.warn("[duckduckgo] CAPTCHA persisted after retry — returning empty results");
+        return [];
+      }
+
+      const vqdEl2 = retryRoot.querySelector('input[name="vqd"]');
+      if (vqdEl2) {
+        const vqd2 = vqdEl2.getAttribute("value");
+        if (vqd2) this.cacheVqd(query, vqd2);
+      }
+
+      const results2: RawResult[] = [];
+      for (const el of retryRoot.querySelectorAll("#links .web-result")) {
+        const link    = el.querySelector("h2 a");
+        const title   = link?.text.trim() ?? "";
+        const url     = link?.getAttribute("href") ?? "";
+        const snippet = truncate(stripHtml(el.querySelector("a.result__snippet")?.text ?? ""));
+        if (!title || !url || !url.startsWith("http")) continue;
+        results2.push({ title, url, snippet });
+      }
+      return results2;
     }
 
-    // Extract and cache VQD from hidden form field (for subsequent page requests)
+    // Extract and cache VQD from hidden form field
     const vqdEl = root.querySelector('input[name="vqd"]');
     if (vqdEl) {
       const vqd = vqdEl.getAttribute("value");
