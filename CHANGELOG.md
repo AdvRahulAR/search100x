@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.2.0] - 2026-08-27
+
+### Added
+- **Indian Kanoon adapter** (`src/adapters/indiankanoon.ts`): Dedicated zero-key search for Supreme Court and High Court judgments, headnotes, and court rulings.
+- **Legal Entity Chunker** (`src/core/reformulator.ts`): Extracts statutory instruments, constitutional articles, and courts for precision multi-engine keyphrase dispatch.
+- **Legal reputation & authority tuning** (`src/core/reputation.ts`): Elevated domain weights for `indiankanoon.org`, `livelaw.in`, `barandbench.com`, `scconline.com`, and `scobserver.in`; added lifestyle/content-farm penalty filters.
+- **Domain presets expansion**: Added legal reporters (`livelaw.in`, `barandbench.com`, `scconline.com`, `scobserver.in`) to `DOMAIN_PRESETS['india-legal']`.
+
+---
+
 ## [3.1.1] - 2026-08-26
 
 ### Fixed
