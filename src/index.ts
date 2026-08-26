@@ -13,7 +13,7 @@ export type {
   TimeRange,
   ResultType,
 } from "./core/types.js";
-export { ENGINE_WEIGHTS, K, rrfScore, normalizeScores, urlAuthorityScore, recencyScore, cascadeScore, DEFAULT_WEIGHTS, NEWS_WEIGHTS, LEGAL_WEIGHTS, ACADEMIC_WEIGHTS, SCORING_PRESETS } from "./core/scorer.js";
+export { ENGINE_WEIGHTS, K, rrfScore, normaliseScores, urlAuthorityScore, recencyScore, cascadeScore, DEFAULT_WEIGHTS, NEWS_WEIGHTS, LEGAL_WEIGHTS, ACADEMIC_WEIGHTS, SCORING_PRESETS } from "./core/scorer.js";
 export type { CascadeWeights } from "./core/scorer.js";
 export { normalizeUrl, urlKey } from "./core/normalizer.js";
 export { bm25Scores, blendScores, BM25_ALPHA, normaliseScores as normaliseBm25Scores, legalCitations } from "./core/bm25.js";
@@ -60,3 +60,8 @@ export {
   isSsrfSafe, isRedirectSafe, detectPromptInjection, BloomFilter, lostInTheMiddleRerank,
 } from "./core/security.js";
 export type { SsrfCheckResult, InjectionCheckResult } from "./core/security.js";
+
+// v3.1.0 exports — provenance, classification, tiers
+export { classifySourceType, addProvenance } from "./core/fetcher.js";
+export { ENGINE_TIERS } from "./core/types.js";
+export type { QueryClassification } from "./core/types.js";
