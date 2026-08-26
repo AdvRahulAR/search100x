@@ -30,6 +30,7 @@ interface CliArgs {
   maxWaitMs?:    number;
   deep?:         boolean;
   noEarlyReturn?: boolean;
+  scoringPreset?: "default" | "news" | "legal" | "academic";
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -84,6 +85,7 @@ Examples:
   let maxWaitMs: number | undefined;
   let deep: boolean | undefined;
   let noEarlyReturn: boolean | undefined;
+  let presetName: "default" | "news" | "legal" | "academic" | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -105,6 +107,7 @@ Examples:
         process.exit(1);
       }
       scope = DOMAIN_PRESETS[name];
+      presetName = name.includes("legal") ? "legal" : (name === "academic" ? "academic" : undefined);
       continue;
     }
     if (a === "--scope") {
@@ -118,7 +121,7 @@ Examples:
     process.exit(1);
   }
 
-  return { query, limit, sources, scope, jsonOutput, enrichTopN, stream, region, minEngines, maxWaitMs, deep, noEarlyReturn };
+  return { query, limit, sources, scope, jsonOutput, enrichTopN, stream, region, minEngines, maxWaitMs, deep, noEarlyReturn, scoringPreset: presetName };
 }
 
 function printResult(
@@ -136,7 +139,7 @@ function printResult(
 }
 
 async function main(): Promise<void> {
-  const { query, limit, sources, scope, jsonOutput, enrichTopN, stream, region, minEngines, maxWaitMs, deep, noEarlyReturn } = parseArgs(process.argv);
+  const { query, limit, sources, scope, jsonOutput, enrichTopN, stream, region, minEngines, maxWaitMs, deep, noEarlyReturn, scoringPreset } = parseArgs(process.argv);
 
   const s = new EnhancedSearch({
     braveApiKey:  process.env.BRAVE_API_KEY,
@@ -147,7 +150,7 @@ async function main(): Promise<void> {
     newsRegion:   region,
   });
 
-  const opts = { limit, sources, scopedDomains: scope, enrichTopN, minEngines, maxWaitMs, deep, noEarlyReturn };
+  const opts = { limit, sources, scopedDomains: scope, enrichTopN, minEngines, maxWaitMs, deep, noEarlyReturn, scoringPreset };
 
   if (stream && !jsonOutput) {
     console.log(`\nSearching: "${query}" (streaming)\n${"─".repeat(70)}`);
@@ -169,11 +172,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  const presetName = scope
+  const activePreset = scope
     ? Object.entries(DOMAIN_PRESETS).find(([, v]) => JSON.stringify(v) === JSON.stringify(scope))?.[0]
     : undefined;
-  const scopeLabel = presetName
-    ? ` (preset: ${presetName})`
+  const scopeLabel = activePreset
+    ? ` (preset: ${activePreset})`
     : scope
     ? ` (scope: ${scope.slice(0, 2).join(", ")}${scope.length > 2 ? ` +${scope.length - 2}` : ""})`
     : "";

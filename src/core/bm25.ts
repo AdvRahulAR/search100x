@@ -116,6 +116,12 @@ const LEGAL_PHRASES: RegExp[] = [
   /\bbharatiya nyaya sanhita\b/gi,
   /\bbharatiya nagarik suraksha sanhita\b/gi,
   /\bconstitution of india\b/gi,
+  /\bsurrogacy regulation act\b/gi,
+  /\bsurrogacy act\b/gi,
+  /\bart act\b/gi,
+  /\btransgender persons act\b/gi,
+  /\bsupreme court\b/gi,
+  /\bhigh court\b/gi,
   // US legal phrases
   /\bunited states code\b/gi,
   /\bcode of federal regulations\b/gi,

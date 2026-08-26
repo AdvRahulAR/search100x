@@ -77,13 +77,14 @@ export function cascadeScore(
   title = "",
   snippet = ""
 ): number {
-  const spamMultiplier = spamSignalScore(title, snippet);
-  return (
+  const spamMultiplier = spamSignalScore(title, snippet, url);
+  const blended = (
     weights.rrf       * rrfNorm +
     weights.bm25      * bm25Norm +
-    weights.authority * urlAuthorityScore(url) * spamMultiplier +
+    weights.authority * urlAuthorityScore(url) +
     weights.recency   * recencyScore(publishedAt, halfLifeDays)
   );
+  return blended * spamMultiplier;
 }
 
 /**
@@ -162,8 +163,9 @@ export const ENGINE_WEIGHTS: Record<string, number> = {
   // SearXNG aggregates ~70 sub-engines; high priority for multi-engine consensus
   searxng:    1.30,
   // Indian legal and compliance databases
-  indiacode:  1.10,
-  sebi:       1.10,
+  indiacode:    1.10,
+  sebi:         1.10,
+  indiankanoon: 1.20,
   // Live-data adapters: always rank first when present — real data > indexed pages
   openmeteo:  1.00,
 };

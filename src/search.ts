@@ -29,6 +29,7 @@ import { MarginaliaEngine } from "./adapters/marginalia.js";
 import { YepEngine }        from "./adapters/yep.js";
 import { OpenMeteoEngine }  from "./adapters/openmeteo.js";
 import { IndiaCodeEngine, SebiEngine } from "./adapters/indiacode.js";
+import { IndianKanoonEngine } from "./adapters/indiankanoon.js";
 
 export { DOMAIN_PRESETS }         from "./core/transformer.js";
 export { ResultCache, FileResultCache } from "./core/cache.js";
@@ -381,6 +382,7 @@ export class EnhancedSearch {
     m.set("yep",        new YepEngine());
     m.set("indiacode",  new IndiaCodeEngine());
     m.set("sebi",       new SebiEngine());
+    m.set("indiankanoon", new IndianKanoonEngine());
 
     if (tavilyApiKey)              m.set("tavily",    new TavilyEngine(tavilyApiKey));
     if (braveApiKey)               m.set("brave",     new BraveEngine(braveApiKey));
@@ -394,22 +396,23 @@ export class EnhancedSearch {
   private buildEntries(requested?: SourceName[], scopedDomains?: string[]): EngineEntry[] {
     const DEFAULT_EXCLUDED: SourceName[] = ["openalex", "indiacode", "sebi"];
     const VARIANT: Record<SourceName, QueryVariant> = {
-      duckduckgo: "primary",
-      bing:       "primary",
-      mojeek:     "primary",
-      googlenews: "recent",
-      bingnews:   "primary",
-      wikipedia:  "primary",
-      openalex:   "primary",
-      tavily:     "primary",
-      brave:      "scoped",
-      google:     "primary",
-      searxng:    "primary",
-      marginalia: "primary",
-      yep:        "primary",
-      openmeteo:  "primary",
-      indiacode:  "primary",
-      sebi:       "primary",
+      duckduckgo:   "primary",
+      bing:         "primary",
+      mojeek:       "primary",
+      googlenews:   "recent",
+      bingnews:     "primary",
+      wikipedia:    "primary",
+      openalex:     "primary",
+      tavily:       "primary",
+      brave:        "scoped",
+      google:       "primary",
+      searxng:      "primary",
+      marginalia:   "primary",
+      yep:          "primary",
+      openmeteo:    "primary",
+      indiacode:    "primary",
+      sebi:         "primary",
+      indiankanoon: "primary",
     };
 
     const base: EngineEntry[] = requested

@@ -58,10 +58,11 @@ export type SourceName =
   | "yep"
   | "openmeteo"
   | "indiacode"
-  | "sebi";
+  | "sebi"
+  | "indiankanoon";
 
 export const ENGINE_TIERS = {
-  tier1: ["searxng", "wikipedia", "bing", "googlenews"] as SourceName[],
+  tier1: ["searxng", "wikipedia", "bing", "googlenews", "indiankanoon"] as SourceName[],
   tier2: ["duckduckgo", "mojeek", "brave", "openalex", "indiacode", "sebi"] as SourceName[],
   tier3: ["marginalia", "yep"] as SourceName[],
 };

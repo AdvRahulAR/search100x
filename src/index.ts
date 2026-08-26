@@ -48,6 +48,7 @@ export { GoogleEngine } from "./adapters/google.js";
 
 // v3.0.0 exports
 export { IndiaCodeEngine, SebiEngine } from "./adapters/indiacode.js";
+export { IndianKanoonEngine } from "./adapters/indiankanoon.js";
 export { WikipediaFullTextEngine, DuckDuckGoLiteEngine, GoogleNewsIndiaEngine } from "./adapters/enhanced-engines.js";
 export { extractContent, extractPdfText, isPdfContentType } from "./core/extractor.js";
 export { ConnectionPool, globalPool, pMap } from "./core/pool.js";

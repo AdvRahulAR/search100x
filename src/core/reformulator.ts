@@ -2,14 +2,40 @@ import { SYNONYMS } from "./transformer.js";
 
 const QUESTION_WORDS = new Set(["what", "how", "why", "who", "where", "when", "which", "are", "is", "do", "does", "can", "should"]);
 
+// ── Legal & Institutional Entity Chunker ───────────────────────────────────────
+
+const LEGAL_STATUTE_PATTERNS = [
+  /\b([A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*)*\s+(?:Act|Code|Bill|Rules|Regulation|Regulations|Order))\b/gi,
+  /\b(Section\s+\d+[A-Za-z]*)\b/gi,
+  /\b(Article\s+\d+[A-Za-z]*)\b/gi,
+  /\b(BNS|IPC|CrPC|CPC|IT Act|GDPR|HIPAA|CCPA|SEBI|RBI|NCLT|NCLAT)\b/gi,
+  /\b(Supreme Court|High Court|Tribunal)\b/gi,
+];
+
 /**
- * Generates up to 2 arithmetic reformulations of the query:
- * 1. Question form: if query is declarative, convert to question ("GDPR fine" → "What is a GDPR fine?")
- * 2. Keyword form: if query is a question, strip to keywords ("What are GDPR requirements?" → "GDPR requirements")
- * 3. Expanded form: if a synonym exists (from the existing SYNONYMS map), substitute one key term
- * 
- * Returns array of [original, ...reformulations] (max 3 total).
- * Pure string arithmetic — no network, no model.
+ * Extracts high-signal legal instruments and institutional entities from a query.
+ */
+export function extractKeyEntities(query: string): string[] {
+  const entities: string[] = [];
+  for (const pat of LEGAL_STATUTE_PATTERNS) {
+    const matches = query.match(pat);
+    if (matches) {
+      for (const m of matches) {
+        if (!entities.some(e => e.toLowerCase() === m.toLowerCase())) {
+          entities.push(m.trim());
+        }
+      }
+    }
+  }
+  return entities;
+}
+
+/**
+ * Generates arithmetic reformulations of the query:
+ * 1. Keyword form: if query is a question, strip to keywords
+ * 2. Question form: if query is declarative, convert to question
+ * 3. Quoted entity form: for long queries (>= 6 words), extract core legal entities
+ * 4. Expanded form: substitute key terms via SYNONYMS map
  */
 export function reformulateQuery(query: string): string[] {
   const trimmed = query.trim();
@@ -31,23 +57,47 @@ export function reformulateQuery(query: string): string[] {
       results.push(cleanWords.join(" "));
     }
   } 
-  // 2. Question form (if query is declarative and not extremely long)
+  // 2. Question form (if query is declarative and concise)
   else if (words.length > 0 && words.length <= 5) {
     const isPlural = words[words.length - 1].endsWith("s");
     const prefix = isPlural ? "What are" : "What is a";
     results.push(`${prefix} ${trimmed}?`);
   }
 
-  // 3. Expanded form (if a synonym exists)
+  // 3. Quoted entity chunking for long/complex legal queries
+  if (words.length >= 6) {
+    const entities = extractKeyEntities(trimmed);
+    if (entities.length > 0) {
+      const quotedEntities = entities.map(e => `"${e}"`).join(" ");
+      // Remove entities from remainder to get keywords
+      let remainder = trimmed;
+      for (const e of entities) {
+        remainder = remainder.replace(new RegExp(e, "gi"), " ");
+      }
+      const coreKeywords = remainder
+        .replace(/[^a-zA-Z0-9\s]/g, "")
+        .split(/\s+/)
+        .filter(w => w.length > 3 && !QUESTION_WORDS.has(w.toLowerCase()))
+        .slice(0, 3)
+        .join(" ");
+
+      const keyphraseQuery = `${quotedEntities} ${coreKeywords}`.trim();
+      if (keyphraseQuery && keyphraseQuery !== trimmed) {
+        results.push(keyphraseQuery);
+      }
+    }
+  }
+
+  // 4. Expanded form (if a synonym exists)
   for (const [term, alts] of Object.entries(SYNONYMS)) {
     if (lower.includes(term) && alts.length > 0) {
       const regex = new RegExp(`\\b${term}\\b`, "i");
       if (regex.test(trimmed)) {
         results.push(trimmed.replace(regex, alts[0]));
-        break; // only do one replacement to keep size <= 3
+        break;
       }
     }
   }
 
-  return [...new Set(results)].slice(0, 3);
+  return [...new Set(results)].slice(0, 4);
 }

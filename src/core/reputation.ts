@@ -12,9 +12,10 @@ const BOOST_DOMAINS: Record<string, number> = {
   "indiankanoon.org": 0.95, "main.sci.gov.in": 0.95, "sci.gov.in": 0.95,
   "indiacode.nic.in": 0.95, "legislative.gov.in": 0.93, "sebi.gov.in": 0.90,
   "rbi.org.in": 0.90, "irdai.gov.in": 0.88, "trai.gov.in": 0.85,
-  "mca.gov.in": 0.90, "ibbi.gov.in": 0.88,
-  // Indian legal news / commentary
-  "livelaw.in": 0.85, "barandbench.com": 0.82, "scconline.com": 0.80,
+  "mca.gov.in": 0.95, "ibbi.gov.in": 0.92,
+  // Indian legal news / commentary / case law reporters
+  "livelaw.in": 0.98, "barandbench.com": 0.98, "scconline.com": 0.98,
+  "thehindu.com": 0.90, "indianexpress.com": 0.90, "scobserver.in": 0.98,
   // Academic
   "scholar.google.com": 0.88, "semanticscholar.org": 0.85,
 };
@@ -24,6 +25,7 @@ const PENALISE_PATTERNS = [
   /\b(deals?|coupon|discount|promo)\b/i,
   /\b(click.?here|buy.?now|order.?now)\b/i,
   /\baffiliate\b/i,
+  /\b(brewing|distilling|realesaletter|trans4mind)\b/i,
 ];
 
 const GOV_EDU = /\.(gov|edu|ac\.[a-z]{2,4})$/;
@@ -51,10 +53,9 @@ export function domainReputation(url: string): number {
   return 1.0;
 }
 
-export function spamSignalScore(title: string, snippet: string): number {
-  const text = `${title} ${snippet}`;
+export function spamSignalScore(title: string, snippet: string, url = ""): number {
+  const text = `${title} ${snippet} ${url}`;
   const hits = PENALISE_PATTERNS.filter(p => p.test(text)).length;
-  // Graded penalty: each matching pattern removes 0.20, floor at 0.40
-  // Prevents a single "Top 10" in a legitimate headline from burying the result
-  return Math.max(0.40, 1.0 - hits * 0.20);
+  // Stronger penalty: each matching pattern cuts score by half, floor at 0.05
+  return hits > 0 ? Math.max(0.05, Math.pow(0.35, hits)) : 1.0;
 }

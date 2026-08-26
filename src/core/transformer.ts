@@ -19,6 +19,10 @@ export const DOMAIN_PRESETS: Record<string, string[]> = {
     "sci.gov.in",
     "legislative.gov.in",
     "indiankanoon.org",
+    "livelaw.in",
+    "barandbench.com",
+    "scconline.com",
+    "scobserver.in",
     "ibbi.gov.in",
     "ncbc.gov.in",
     "gst.gov.in",
@@ -141,10 +145,12 @@ export function buildQueryBundle(
 ): QueryBundle {
   const base = query.trim();
 
-  const scoped =
-    scopedDomains && scopedDomains.length > 0
-      ? scopedDomains.map((d) => `site:${d}`).join(" OR ") + ` ${base}`
-      : base;
+  let scoped = base;
+  if (scopedDomains && scopedDomains.length > 0) {
+    const topDomains = scopedDomains.slice(0, 6);
+    const siteClause = topDomains.map((d) => `site:${d}`).join(" OR ");
+    scoped = `(${siteClause}) ${base}`;
+  }
 
   return {
     primary: expandQuery(base),

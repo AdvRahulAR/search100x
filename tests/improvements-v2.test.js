@@ -63,14 +63,14 @@ describe("Domain Reputation & Quality Filter", () => {
   });
 
   it("penalizes spammy titles/snippets with graded penalty", () => {
-    // Single spam pattern: 1.0 - 0.20 = 0.80
+    // Single spam pattern cuts score
     const singleHit = spamSignalScore("Top 10 Best VPNs", "");
     assert.ok(singleHit < 1.0, `Single spam signal should reduce score, got ${singleHit}`);
-    assert.ok(singleHit >= 0.40, `Score should not drop below floor 0.40, got ${singleHit}`);
-    // Multiple spam patterns hit the floor at 0.40
+    assert.ok(singleHit >= 0.05, `Score should not drop below floor 0.05, got ${singleHit}`);
+    // Multiple spam patterns hit hard
     const multiHit = spamSignalScore("Top 10 Best VPNs Click Here", "Get cheap discount!");
     assert.ok(multiHit <= singleHit, `More spam patterns should score lower: ${multiHit} <= ${singleHit}`);
-    assert.ok(multiHit >= 0.40, `Score floor is 0.40, got ${multiHit}`);
+    assert.ok(multiHit >= 0.05, `Score floor is 0.05, got ${multiHit}`);
     // Clean title: no penalty
     const clean = spamSignalScore("GDPR compliance requirements 2024", "The regulation requires...");
     assert.strictEqual(clean, 1.0, `Clean title should score 1.0, got ${clean}`);
