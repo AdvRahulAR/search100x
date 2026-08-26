@@ -56,7 +56,17 @@ export type SourceName =
   | "searxng"
   | "marginalia"
   | "yep"
-  | "openmeteo";
+  | "openmeteo"
+  | "indiacode"
+  | "sebi";
+
+export const ENGINE_TIERS = {
+  tier1: ["wikipedia", "duckduckgo", "bing", "googlenews"] as SourceName[],
+  tier2: ["mojeek", "brave", "openalex", "indiacode", "sebi"] as SourceName[],
+  tier3: ["marginalia", "yep", "searxng"] as SourceName[],
+};
+
+export type QueryClassification = "news" | "legal" | "academic" | "general";
 
 /** Coarse category of a search result — set by the engine that found it. */
 export type ResultType = "web" | "news" | "academic" | "encyclopedia";

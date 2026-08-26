@@ -22,6 +22,8 @@
 import { parse } from "node-html-parser";
 import { http } from "./http.js";
 import { bm25Scores, legalCitations } from "./bm25.js";
+import { extractContent } from "./extractor.js";
+import { SearchResult, ResultType } from "./types.js";
 
 const FETCH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0";
 
@@ -215,6 +217,10 @@ async function fetchCleanText(url: string, timeoutMs: number): Promise<string | 
     // WAF / bot challenge guard — don't return challenge pages as content
     if (isBotChallenge(html)) return undefined;
 
+    // Use Trafilatura-style cascade extractor
+    const extracted = extractContent(html);
+    if (extracted && extracted.length >= 50) return extracted;
+
     const root = parse(html);
     for (const sel of NOISE_SELECTORS) {
       root.querySelectorAll(sel).forEach((n) => n.remove());
@@ -231,6 +237,36 @@ async function fetchCleanText(url: string, timeoutMs: number): Promise<string | 
   } catch {
     return undefined;
   }
+}
+
+// ── Content Provenance & Classification ───────────────────────────────────────
+
+export function classifySourceType(url: string): ResultType {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (INDIAN_LEGAL_DOMAINS.test(host) || INDIAN_LEGAL_SITES.test(host) || US_LEGAL_DOMAINS.test(host) || US_LEGAL_SITES.test(host)) {
+      return "web";
+    }
+    if (/arxiv\.org|openalex\.org|pubmed|doi\.org|science\.org|nature\.com/.test(host)) {
+      return "academic";
+    }
+    if (/wikipedia\.org/.test(host)) {
+      return "encyclopedia";
+    }
+    if (/news\.google|reuters|bbc|bloomberg|nytimes|thehindu|ndtv|indianexpress/.test(host)) {
+      return "news";
+    }
+    return "web";
+  } catch {
+    return "web";
+  }
+}
+
+export function addProvenance(results: SearchResult[]): SearchResult[] {
+  return results.map((r) => ({
+    ...r,
+    type: r.type ?? classifySourceType(r.url),
+  }));
 }
 
 // ── Passage splitter ──────────────────────────────────────────────────────────

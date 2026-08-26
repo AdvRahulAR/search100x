@@ -28,6 +28,7 @@ import { SearXNGEngine }    from "./adapters/searxng.js";
 import { MarginaliaEngine } from "./adapters/marginalia.js";
 import { YepEngine }        from "./adapters/yep.js";
 import { OpenMeteoEngine }  from "./adapters/openmeteo.js";
+import { IndiaCodeEngine, SebiEngine } from "./adapters/indiacode.js";
 
 export { DOMAIN_PRESETS }         from "./core/transformer.js";
 export { ResultCache, FileResultCache } from "./core/cache.js";
@@ -323,6 +324,8 @@ export class EnhancedSearch {
     m.set("openalex",   new OpenAlexEngine());
     m.set("marginalia", new MarginaliaEngine());
     m.set("yep",        new YepEngine());
+    m.set("indiacode",  new IndiaCodeEngine());
+    m.set("sebi",       new SebiEngine());
 
     if (tavilyApiKey)              m.set("tavily",    new TavilyEngine(tavilyApiKey));
     if (braveApiKey)               m.set("brave",     new BraveEngine(braveApiKey));
@@ -334,7 +337,7 @@ export class EnhancedSearch {
   }
 
   private buildEntries(requested?: SourceName[], scopedDomains?: string[]): EngineEntry[] {
-    const DEFAULT_EXCLUDED: SourceName[] = ["openalex"];
+    const DEFAULT_EXCLUDED: SourceName[] = ["openalex", "indiacode", "sebi"];
     const VARIANT: Record<SourceName, QueryVariant> = {
       duckduckgo: "primary",
       bing:       "primary",
@@ -350,6 +353,8 @@ export class EnhancedSearch {
       marginalia: "primary",
       yep:        "primary",
       openmeteo:  "primary",
+      indiacode:  "primary",
+      sebi:       "primary",
     };
 
     const base: EngineEntry[] = requested
