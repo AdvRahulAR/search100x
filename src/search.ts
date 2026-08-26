@@ -1,17 +1,24 @@
 import {
   SearchConfig, SearchOptions, SearchResponse, SearchResult, SourceName, Logger,
+  ENGINE_TIERS,
 } from "./core/types.js";
 import { Engine, ENGINE_TIMEOUTS } from "./core/engine.js";
 import { ResultContainer } from "./core/container.js";
 import { buildQueryBundle, QueryBundle, DOMAIN_PRESETS } from "./core/transformer.js";
 import { IResultCache, ResultCache, cacheKey } from "./core/cache.js";
 import { CircuitBreakerRegistry } from "./core/circuit.js";
-import { enrichSnippets, enrichContents } from "./core/fetcher.js";
+import { enrichSnippets, enrichContents, addProvenance, fetchRelevantContent } from "./core/fetcher.js";
 import { SCORING_PRESETS, DEFAULT_WEIGHTS } from "./core/scorer.js";
 import { rerankResults } from "./core/reranker.js";
 import { classifyQuery, detectLiveIntent } from "./core/classifier.js";
 import { reformulateQuery } from "./core/reformulator.js";
 import { defaultLogger, silentLogger } from "./core/logger.js";
+import { dedupByContent } from "./core/simhash.js";
+import { lostInTheMiddleRerank, detectPromptInjection } from "./core/security.js";
+import { globalPool } from "./core/pool.js";
+
+// New engine adapters (Phase 3)
+import { IndiaCodeEngine, SebiEngine } from "./adapters/indiacode.js";
 
 // Adapters
 import { DuckDuckGoEngine } from "./adapters/duckduckgo.js";
@@ -35,6 +42,19 @@ export { ResultCache, FileResultCache } from "./core/cache.js";
 const DEFAULT_TIMEOUT = 7000;
 const DEFAULT_LIMIT   = 15;
 const DEFAULT_REGION  = "US";
+
+// ── Phase 1.3: Early-return defaults ──
+const DEFAULT_MIN_RESULTS = 5;
+const DEFAULT_MIN_ENGINES = 3;
+const DEFAULT_MAX_WAIT_MS = 3000;
+
+// ── Phase 1.6: Pre-warming domains ──
+const WARMUP_DOMAINS = [
+  "https://en.wikipedia.org",
+  "https://html.duckduckgo.com",
+  "https://www.bing.com",
+  "https://news.google.com",
+];
 
 type QueryVariant = keyof Pick<QueryBundle, "primary" | "recent" | "scoped">;
 
@@ -69,6 +89,16 @@ export class EnhancedSearch {
     this.cache    = config.cache ?? new ResultCache();
     this.circuit  = new CircuitBreakerRegistry(this.logger);
     this.engineMap = this.initEngines();
+    // Phase 1.6: Pre-warm connections to top domains on startup
+    this.prewarmConnections();
+  }
+
+  /** Phase 1.6: Pre-warm connections to common domains (fire-and-forget). */
+  private prewarmConnections(): void {
+    for (const url of WARMUP_DOMAINS) {
+      fetch(url, { method: "HEAD", signal: AbortSignal.timeout(2000) })
+        .catch(() => {}); // ignore errors — just warming the pool
+    }
   }
 
   use(engine: Engine): this {
@@ -97,6 +127,11 @@ export class EnhancedSearch {
       scoringPreset,
       rerank           = false,
       rerankCandidates = 20,
+      // Phase 1.3: Early-return options
+      minResults       = DEFAULT_MIN_RESULTS,
+      minEngines       = DEFAULT_MIN_ENGINES,
+      maxWaitMs        = DEFAULT_MAX_WAIT_MS,
+      deep             = false,
     } = options;
 
     if (limit < 1 || limit > 100) {
@@ -111,7 +146,7 @@ export class EnhancedSearch {
 
     const totalTimeout = this.config.timeoutMs ?? DEFAULT_TIMEOUT;
     const deadline     = Date.now() + totalTimeout;
-    const entries      = this.buildEntries(options.sources, scopedDomains);
+    const entries      = this.buildEntries(options.sources, scopedDomains, deep);
     const srcKeys      = entries.map((e) => `${e.engine.name}:${e.variant}`);
 
     if (!noCache) {
@@ -125,8 +160,23 @@ export class EnhancedSearch {
     const halfLife  = preset === "legal" || preset === "academic" ? 365 : (preset === "news" ? 3 : 30);
     const container = new ResultContainer(query);
 
+    // Phase 1.4: Tiered engine priority — query tier 1 first, fall back to tier 2
+    const tier1Names = new Set([...ENGINE_TIERS.tier1] as string[]);
+    const tier2Names = new Set([...ENGINE_TIERS.tier2] as string[]);
+    const tier1Entries = entries.filter(e => tier1Names.has(e.engine.name));
+    const tier2Entries = entries.filter(e => tier2Names.has(e.engine.name));
+    const allTierNames = new Set([...tier1Names, ...tier2Names]);
+    const tier3Entries = entries.filter(e =>
+      !allTierNames.has(e.engine.name)
+    );
+
     const liveIntent = detectLiveIntent(query);
-    let activeEntries = entries;
+    let activeEntries = tier1Entries.concat(tier2Entries);
+    if (deep) activeEntries = activeEntries.concat(tier3Entries);
+
+    // Phase 1.3: Early-return state
+    let enginesResponded = 0;
+    let settled = false;
 
     const tasks: Promise<void>[] = [];
 
@@ -160,6 +210,7 @@ export class EnhancedSearch {
       tasks.push((async () => {
         if (this.circuit.isOpen(engine.name)) {
           this.logger.warn(`[circuit] skipping ${engine.name} (OPEN)`);
+          enginesResponded++;
           return;
         }
         const engineTimeout = ENGINE_TIMEOUTS[engine.name] ?? totalTimeout;
@@ -170,6 +221,7 @@ export class EnhancedSearch {
           engine.name,
           this.logger
         );
+        enginesResponded++;
         if (result === null) {
           this.circuit.recordFailure(engine.name);
         } else {
@@ -212,7 +264,28 @@ export class EnhancedSearch {
       });
     });
 
-    await Promise.all(tasks);
+    // Phase 1.3: Early-return — race between all engines completing and minResults arriving
+    const earlyReturnPromise = new Promise<void>((resolve) => {
+      const checkInterval = setInterval(() => {
+        const totalResults = container.size;
+        if (!settled && totalResults >= minResults && enginesResponded >= minEngines) {
+          settled = true;
+          clearInterval(checkInterval);
+          resolve();
+        }
+      }, 50);
+      // Hard timeout — return whatever we have
+      setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          clearInterval(checkInterval);
+          resolve();
+        }
+      }, maxWaitMs);
+    });
+
+    await Promise.race([Promise.all(tasks), earlyReturnPromise]);
+    settled = true;
 
     const fetchLimit = rerank ? Math.max(limit, rerankCandidates) : limit;
     let results = container.getResults(fetchLimit, weights, halfLife);
@@ -231,10 +304,27 @@ export class EnhancedSearch {
       const isLegal = preset === "legal";
       const enrichTimeout = Math.min(totalTimeout, isLegal ? 8_000 : 8_000);
       results = await enrichContents(results, enrichContent, enrichTimeout, query, { legalMode: isLegal });
+      // Phase 4.6: Add provenance metadata
+      results = addProvenance(results);
     }
 
     if (rerank && results.length > 0) {
       results = await rerankResults(query, results, rerankCandidates);
+    }
+
+    // Phase 4: SimHash near-duplicate detection — demote duplicates
+    if (results.length > 3) {
+      const deduped = dedupByContent(results, 3);
+      // Move duplicates to the end, keep unique results on top
+      const unique = deduped.filter((d) => !d.isDuplicate).map((d) => d.result);
+      const dupes = deduped.filter((d) => d.isDuplicate).map((d) => d.result);
+      results = [...unique, ...dupes];
+    }
+
+    // Phase 4: Lost-in-the-middle reranking — place best results at edges
+    // of the context window for better LLM attention
+    if (results.length > 6 && enrichContent > 0) {
+      results = lostInTheMiddleRerank(results, 6);
     }
 
     results = results.slice(0, limit);
@@ -330,11 +420,54 @@ export class EnhancedSearch {
     if (googleApiKey && googleCx)  m.set("google",    new GoogleEngine(googleApiKey, googleCx));
     m.set("searxng", new SearXNGEngine(this.config.searxng ?? {}));
 
+    // Phase 3: Indian legal source engines
+    m.set("indiacode", new IndiaCodeEngine());
+    m.set("sebi",      new SebiEngine());
+
     return m;
   }
 
-  private buildEntries(requested?: SourceName[], scopedDomains?: string[]): EngineEntry[] {
+  /**
+   * Phase 1.5: Streaming enrichment — async generator that yields search results
+   * first, then yields enriched content as each page is fetched.
+   */
+  async *searchWithEnrichment(
+    query:   string,
+    options: SearchOptions = {}
+  ): AsyncGenerator<{ type: "result" | "enriched"; data: SearchResult }> {
+    // Phase 1: Stream search results as engines complete
+    const collected: SearchResult[] = [];
+    for await (const batch of this.searchStream(query, options)) {
+      for (const result of batch) {
+        collected.push(result);
+        yield { type: "result", data: result };
+      }
+    }
+
+    // Phase 2: Enrich top results in parallel, yield as each completes
+    const enrichCount = options.enrichContent ?? 3;
+    const topResults = collected.slice(0, enrichCount);
+    const deadline = Date.now() + (this.config.timeoutMs ?? DEFAULT_TIMEOUT);
+
+    for (const r of topResults) {
+      try {
+        const remaining = Math.max(500, deadline - Date.now());
+        const content = await fetchRelevantContent(r.url, query, { timeoutMs: remaining });
+        if (content) {
+          r.content = content;
+          r.fetchedAt = Date.now();
+        }
+        yield { type: "enriched", data: r };
+      } catch {
+        yield { type: "enriched", data: r };
+      }
+    }
+  }
+
+  private buildEntries(requested?: SourceName[], scopedDomains?: string[], deep = false): EngineEntry[] {
     const DEFAULT_EXCLUDED: SourceName[] = ["openalex"];
+    // In non-deep mode, exclude tier-3 engines from default query set
+    const TIER3_NAMES = new Set([...ENGINE_TIERS.tier3] as string[]);
     const VARIANT: Record<SourceName, QueryVariant> = {
       duckduckgo: "primary",
       bing:       "primary",
@@ -350,6 +483,8 @@ export class EnhancedSearch {
       marginalia: "primary",
       yep:        "primary",
       openmeteo:  "primary",
+      indiacode:  "primary",
+      sebi:       "primary",
     };
 
     const base: EngineEntry[] = requested
@@ -359,6 +494,7 @@ export class EnhancedSearch {
         })
       : [...this.engineMap.entries()]
           .filter(([name]) => !DEFAULT_EXCLUDED.includes(name) && !this.disabled.has(name))
+          .filter(([name]) => deep || !TIER3_NAMES.has(name))
           .map(([name, engine]) => ({ engine, variant: VARIANT[name] }));
 
     const pluginEntries: EngineEntry[] = this.plugins.map((e) => ({
