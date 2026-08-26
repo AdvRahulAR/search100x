@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Primitive result returned by every engine adapter.
 // Engines produce a ranked list of these; the merger/scorer handles the rest.
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────────
 
 export interface RawResult {
   title:       string;
@@ -38,9 +38,9 @@ export interface MergedResult {
   appearances: Appearance[];
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // Public API surface
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────
 
 export type SourceName =
   | "duckduckgo"
@@ -56,7 +56,9 @@ export type SourceName =
   | "searxng"
   | "marginalia"
   | "yep"
-  | "openmeteo";
+  | "openmeteo"
+  | "indiacode"
+  | "sebi";
 
 /** Coarse category of a search result — set by the engine that found it. */
 export type ResultType = "web" | "news" | "academic" | "encyclopedia";
@@ -78,6 +80,15 @@ export interface SearchResult {
   publishedAt?: Date;
   /** Coarse result category set by the engine: web / news / academic / encyclopedia. */
   type?: ResultType;
+  // ── Phase 4.6: Content provenance metadata ──
+  /** Timestamp when this result's content was fetched (epoch ms). Undefined if not enriched. */
+  fetchedAt?: number;
+  /** Source classification — auto-detected from URL domain. */
+  sourceType?: "government" | "news" | "academic" | "legal-database" | "general";
+  /** Domain authority score (0–1) — derived from TLD + reputation map. */
+  authorityScore?: number;
+  /** Freshness classification — determined from query type. */
+  freshness?: "realtime" | "recent" | "evergreen";
 }
 
 export interface SearXNGConfig {
@@ -168,6 +179,16 @@ export interface SearchOptions {
   rerankCandidates?: number;
   /** Enable multi-variant query fan-out for higher recall (default: false) */
   reformulate?: boolean;
+
+  // ── Phase 1.3: Early-return strategy ──
+  /** Return as soon as this many results are collected (default: 5) */
+  minResults?: number;
+  /** Minimum number of engines that must respond before returning (default: 3) */
+  minEngines?: number;
+  /** Hard timeout — return whatever we have at this point (default: 3000) */
+  maxWaitMs?: number;
+  /** Enable deep mode — query tier-3 slow engines (default: false) */
+  deep?: boolean;
 }
 
 export interface SearchResponse {
@@ -183,3 +204,13 @@ export interface Logger {
   log(msg: string): void;
   debug?(msg: string): void;
 }
+
+// ── Phase 4.7: Query classification ──
+export type QueryClassification = "legal" | "news" | "academic" | "general";
+
+// ── Phase 1.4: Engine tiers ──
+export const ENGINE_TIERS = {
+  tier1: ["wikipedia", "duckduckgo", "bing", "googlenews"] as const,
+  tier2: ["mojeek", "brave", "bingnews", "searxng"] as const,
+  tier3: ["marginalia", "yep", "indiacode", "sebi", "openalex"] as const,
+} as const;
