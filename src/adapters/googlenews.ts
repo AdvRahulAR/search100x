@@ -16,9 +16,14 @@ function parseRss(xml: string): RawResult[] {
     const src   = decodeEntities(item.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] ?? "");
     const pub   = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1]?.trim() ?? "";
     if (!title || !link) continue;
-    const dateStr = pub ? new Date(pub).toLocaleDateString("en-US") : "";
+    let publishedAt: Date | undefined;
+    if (pub) {
+      const d = new Date(pub);
+      if (!isNaN(d.getTime())) publishedAt = d;
+    }
+    const dateStr = publishedAt ? publishedAt.toLocaleDateString("en-US") : "";
     const snippet = truncate(`${src ? `[${src}] ` : ""}${title}${dateStr ? ` — ${dateStr}` : ""}`);
-    results.push({ title, url: link, snippet });
+    results.push({ title, url: link, snippet, publishedAt });
   }
   return results;
 }

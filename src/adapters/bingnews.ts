@@ -62,12 +62,16 @@ export class BingNewsEngine implements Engine {
       if (!title || !rawLink) continue;
       const url     = extractRealUrl(rawLink);
       let dateStr = "";
+      let publishedAt: Date | undefined;
       if (pub) {
         const parsed = new Date(pub);
-        if (!isNaN(parsed.getTime())) dateStr = fmt.format(parsed);
+        if (!isNaN(parsed.getTime())) {
+          publishedAt = parsed;
+          dateStr = fmt.format(parsed);
+        }
       }
       const snippet = truncate(desc || `${src ? `[${src}] ` : ""}${title}${dateStr ? ` — ${dateStr}` : ""}`);
-      results.push({ title, url, snippet });
+      results.push({ title, url, snippet, publishedAt });
     }
     return results;
   }

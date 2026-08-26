@@ -201,9 +201,14 @@ export class ResultContainer {
     const engineCount = Math.max(1, engines.size);
     const rrfNorm = normaliseScores(rawRrf, engineCount);
 
-    // ── BM25 term relevance (snippet-level) ───────────────────────────────────
+    // ── BM25 term relevance (title + snippet combined) ──────────────────────
     const queryTokens = tokenize(this.query);
-    const bm25Norm = records.map((r) => snippetRelevanceScore(r.snippet, queryTokens));
+    const bm25Norm = records.map((r) => {
+      const titleScore = snippetRelevanceScore(r.title, queryTokens);
+      const snipScore = snippetRelevanceScore(r.snippet, queryTokens);
+      // Weight title match 2x over snippet match
+      return Math.min(1.0, titleScore * 0.65 + snipScore * 0.35);
+    });
 
     // ── Cascade score ─────────────────────────────────────────────────────────
     const results: SearchResult[] = records.map((r, i) => ({
