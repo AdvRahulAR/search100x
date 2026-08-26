@@ -113,7 +113,7 @@ export class EnhancedSearch {
 
     const totalTimeout = this.config.timeoutMs ?? DEFAULT_TIMEOUT;
     const deadline     = Date.now() + totalTimeout;
-    const entries      = this.buildEntries(options.sources, scopedDomains);
+    const entries      = this.buildEntries(options.sources, scopedDomains, preset);
     const srcKeys      = entries.map((e) => `${e.engine.name}:${e.variant}`);
 
     if (!noCache) {
@@ -393,8 +393,11 @@ export class EnhancedSearch {
     return m;
   }
 
-  private buildEntries(requested?: SourceName[], scopedDomains?: string[]): EngineEntry[] {
-    const DEFAULT_EXCLUDED: SourceName[] = ["openalex", "indiacode", "sebi"];
+  private buildEntries(requested?: SourceName[], scopedDomains?: string[], preset?: string): EngineEntry[] {
+    const isLegalPreset = preset === "legal" || (scopedDomains && scopedDomains.some(d => d.includes(".nic.in") || d.includes("kanoon") || d.includes("livelaw")));
+    const DEFAULT_EXCLUDED: SourceName[] = isLegalPreset
+      ? ["openalex"]
+      : ["openalex", "indiacode", "sebi"];
     const VARIANT: Record<SourceName, QueryVariant> = {
       duckduckgo:   "primary",
       bing:         "primary",

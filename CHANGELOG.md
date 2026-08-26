@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.2.1] - 2026-08-27
+
+### Fixed
+- **Legal preset engine auto-inclusion**: `indiankanoon`, `indiacode`, and `sebi` are now dynamically activated when `scoringPreset: 'legal'` or `--preset india-legal` is specified.
+- **Top legal authority ranking**: Indian Kanoon case law judgments and constitutional petitions now take top rank in CLI output.
+
+---
+
 ## [3.2.0] - 2026-08-27
 
 ### Added
