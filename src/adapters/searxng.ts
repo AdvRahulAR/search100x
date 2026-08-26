@@ -69,11 +69,15 @@ export class SearXNGEngine implements Engine {
           if (!isNaN(d.getTime())) publishedAt = d;
         }
 
+        const subEngines: string[] = Array.isArray(r.engines)
+          ? r.engines.map(String)
+          : (r.engine ? [String(r.engine)] : []);
+
         return {
           title:       String(r.title   ?? "").trim(),
           url:         String(r.url     ?? "").trim(),
           snippet:     String(r.content ?? "").trim(),
-          subEngines:  Array.isArray(r.engines) ? r.engines.map(String) : [],
+          subEngines,
           publishedAt,
         } satisfies RawResult;
       }).filter((r) => r.url && r.title);
