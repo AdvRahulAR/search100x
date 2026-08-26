@@ -35,12 +35,13 @@ export const ENGINE_TIMEOUTS: Record<string, number> = {
   tavily:     4_000,
   google:     4_000,
   openalex:   4_000,
-  searxng:    7_000,
+  // SearXNG aggregates ~70 engines and legitimately needs more time (up to 10s)
+  searxng:    10_000,
   marginalia: 3_500,
   yep:        4_000,
   // Two sequential HTTP calls (geocode + weather) — needs generous budget
   openmeteo:  6_000,
   // Indian legal sources — government sites can be slow
   indiacode:  5_000,
-  sebi:       4_000,
+  sebi:       5_000,
 };

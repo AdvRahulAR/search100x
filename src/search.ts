@@ -157,63 +157,118 @@ export class EnhancedSearch {
       );
     }
 
-    activeEntries.forEach(({ engine, variant }) => {
-      tasks.push((async () => {
-        if (this.circuit.isOpen(engine.name)) {
-          this.logger.warn(`[circuit] skipping ${engine.name} (OPEN)`);
+    const minResults = options.minResults ?? 5;
+    const minEngines = options.minEngines ?? 3;
+    const maxWaitMs = options.maxWaitMs ?? 4000;
+    const noEarlyReturn = options.noEarlyReturn ?? false;
+    const isDeep = options.deep ?? false;
+
+    let successfulEngines = 0;
+    let settled = false;
+
+    const executeEngines = async (): Promise<void> => {
+      return new Promise<void>((resolve) => {
+        let pending = activeEntries.length;
+
+        const checkEarlyReturn = () => {
+          if (settled) return;
+          if (!noEarlyReturn && !isDeep) {
+            if (container.size >= minResults && successfulEngines >= minEngines) {
+              settled = true;
+              resolve();
+            }
+          }
+        };
+
+        const timeoutTimer = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            resolve();
+          }
+        }, Math.min(totalTimeout, isDeep ? totalTimeout : maxWaitMs));
+
+        if (activeEntries.length === 0) {
+          clearTimeout(timeoutTimer);
+          resolve();
           return;
         }
-        const engineTimeout = ENGINE_TIMEOUTS[engine.name] ?? totalTimeout;
-        const remaining     = Math.max(1_000, Math.min(engineTimeout, deadline - Date.now()));
-        const result        = await withDeadline(
-          engine.search(bundle[variant], remaining, bundle.timeRange, bundle.page),
-          remaining,
-          engine.name,
-          this.logger
-        );
-        if (result === null) {
-          this.circuit.recordFailure(engine.name);
-        } else {
-          container.add(engine.name, result);
-          this.circuit.recordSuccess(engine.name);
-        }
-      })());
-    });
+
+        activeEntries.forEach(({ engine, variant }) => {
+          (async () => {
+            if (this.circuit.isOpen(engine.name)) {
+              this.logger.warn(`[circuit] skipping ${engine.name} (OPEN)`);
+              pending--;
+              if (pending === 0 && !settled) {
+                clearTimeout(timeoutTimer);
+                settled = true;
+                resolve();
+              }
+              return;
+            }
+
+            const engineTimeout = ENGINE_TIMEOUTS[engine.name] ?? totalTimeout;
+            const remaining = Math.max(1_000, Math.min(engineTimeout, deadline - Date.now()));
+            const result = await withDeadline(
+              engine.search(bundle[variant], remaining, bundle.timeRange, bundle.page),
+              remaining,
+              engine.name,
+              this.logger
+            );
+
+            if (result === null || result.length === 0) {
+              if (result === null) this.circuit.recordFailure(engine.name);
+            } else {
+              container.add(engine.name, result);
+              this.circuit.recordSuccess(engine.name);
+              successfulEngines++;
+              checkEarlyReturn();
+            }
+
+            pending--;
+            if (pending === 0 && !settled) {
+              clearTimeout(timeoutTimer);
+              settled = true;
+              resolve();
+            }
+          })();
+        });
+      });
+    };
+
+    await executeEngines();
 
     const shouldReformulate = options.reformulate ?? false;
     const extraQueries = shouldReformulate ? reformulateQuery(query).slice(1) : [];
 
-    extraQueries.forEach((eq) => {
-      const eqBundle = buildQueryBundle(eq, scopedDomains, resolvedTimeRange, page);
-      const freeWebEngines = ["duckduckgo", "bing", "mojeek", "brave"];
-      const activeFreeEntries = entries.filter(e => freeWebEngines.includes(e.engine.name));
+    if (extraQueries.length > 0) {
+      const extraTasks: Promise<void>[] = [];
+      extraQueries.forEach((eq) => {
+        const eqBundle = buildQueryBundle(eq, scopedDomains, resolvedTimeRange, page);
+        const freeWebEngines = ["duckduckgo", "bing", "mojeek", "brave", "searxng"];
+        const activeFreeEntries = entries.filter(e => freeWebEngines.includes(e.engine.name));
 
-      activeFreeEntries.forEach(({ engine, variant }) => {
-        tasks.push((async () => {
-          if (this.circuit.isOpen(engine.name)) return;
-          const engineTimeout = ENGINE_TIMEOUTS[engine.name] ?? totalTimeout;
-          const remaining     = Math.max(1_000, Math.min(engineTimeout, deadline - Date.now()));
-          const result        = await withDeadline(
-            engine.search(eqBundle[variant], remaining, eqBundle.timeRange, eqBundle.page),
-            remaining,
-            `${engine.name}:${eq}`,
-            this.logger
-          );
-          if (result === null) {
-            this.circuit.recordFailure(engine.name);
-          } else {
-            const sizeBefore = container.size;
-            container.add(engine.name, result);
-            const sizeAfter = container.size;
-            const added = sizeAfter - sizeBefore;
-            console.log(`[reformulator] query "${eq}" on ${engine.name} added ${added} unique results.`);
-            this.circuit.recordSuccess(engine.name);
-          }
-        })());
+        activeFreeEntries.forEach(({ engine, variant }) => {
+          extraTasks.push((async () => {
+            if (this.circuit.isOpen(engine.name)) return;
+            const engineTimeout = ENGINE_TIMEOUTS[engine.name] ?? totalTimeout;
+            const remaining     = Math.max(1_000, Math.min(engineTimeout, deadline - Date.now()));
+            const result        = await withDeadline(
+              engine.search(eqBundle[variant], remaining, eqBundle.timeRange, eqBundle.page),
+              remaining,
+              `${engine.name}:${eq}`,
+              this.logger
+            );
+            if (result === null) {
+              this.circuit.recordFailure(engine.name);
+            } else if (result.length > 0) {
+              container.add(engine.name, result);
+              this.circuit.recordSuccess(engine.name);
+            }
+          })());
+        });
       });
-    });
-
-    await Promise.all(tasks);
+      await Promise.all(extraTasks);
+    }
 
     const fetchLimit = rerank ? Math.max(limit, rerankCandidates) : limit;
     let results = container.getResults(fetchLimit, weights, halfLife);

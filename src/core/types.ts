@@ -61,9 +61,9 @@ export type SourceName =
   | "sebi";
 
 export const ENGINE_TIERS = {
-  tier1: ["wikipedia", "duckduckgo", "bing", "googlenews"] as SourceName[],
-  tier2: ["mojeek", "brave", "openalex", "indiacode", "sebi"] as SourceName[],
-  tier3: ["marginalia", "yep", "searxng"] as SourceName[],
+  tier1: ["searxng", "wikipedia", "bing", "googlenews"] as SourceName[],
+  tier2: ["duckduckgo", "mojeek", "brave", "openalex", "indiacode", "sebi"] as SourceName[],
+  tier3: ["marginalia", "yep"] as SourceName[],
 };
 
 export type QueryClassification = "news" | "legal" | "academic" | "general";
@@ -169,8 +169,7 @@ export interface SearchOptions {
    * "academic" → authority-heavy, term precision high
    */
   scoringPreset?: "default" | "news" | "legal" | "academic";
-  /**
-   * Re-rank top-N results using a cross-encoder model after RRF+BM25 scoring.
+  /** Re-rank top-N results using a cross-encoder model after RRF+BM25 scoring.
    * Requires onnxruntime-node and the bundled ONNX model. Default: false.
    */
   rerank?: boolean;
@@ -178,6 +177,16 @@ export interface SearchOptions {
   rerankCandidates?: number;
   /** Enable multi-variant query fan-out for higher recall (default: false) */
   reformulate?: boolean;
+  /** Minimum results required before early return resolves (default: 5) */
+  minResults?: number;
+  /** Minimum number of successful responding engines required before early return (default: 3) */
+  minEngines?: number;
+  /** Maximum wait time in ms before early return fallback (default: 4000) */
+  maxWaitMs?: number;
+  /** Deep mode — queries all engines including slower tier-3 engines and avoids premature return */
+  deep?: boolean;
+  /** Disable early-return and wait for all scheduled engines to complete or timeout */
+  noEarlyReturn?: boolean;
 }
 
 export interface SearchResponse {

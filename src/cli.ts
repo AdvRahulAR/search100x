@@ -18,14 +18,18 @@ import { EnhancedSearch, DOMAIN_PRESETS } from "./search.js";
 import { SourceName } from "./core/types.js";
 
 interface CliArgs {
-  query:      string;
-  limit:      number;
-  sources?:   SourceName[];
-  scope?:     string[];
-  jsonOutput: boolean;
-  enrichTopN: number;
-  stream:     boolean;
-  region:     string;
+  query:         string;
+  limit:         number;
+  sources?:      SourceName[];
+  scope?:        string[];
+  jsonOutput:    boolean;
+  enrichTopN:    number;
+  stream:        boolean;
+  region:        string;
+  minEngines?:   number;
+  maxWaitMs?:    number;
+  deep?:         boolean;
+  noEarlyReturn?: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -47,11 +51,15 @@ Options:
                        --scope legislation.gov.uk,ico.org.uk
   --region <CC>        News region ISO 3166-1 code (default: US)
   --enrich <n>         Fetch full page content for top-N results (default: 0)
+  --min-engines <n>    Minimum successful engines needed for early-return (default: 3)
+  --max-wait <ms>      Maximum wait time in ms before early-return (default: 4000)
+  --deep               Deep search mode (queries all engines, waits for thorough results)
+  --no-early-return    Disable early-return and wait for all engines
   --stream             Show results as each engine responds
   --json               Output raw JSON (pipe-friendly)
 
 Engines: duckduckgo, bing, mojeek, googlenews, bingnews, wikipedia,
-         openalex (opt-in), brave*, tavily*, google*  (* = API key required)
+         searxng, openalex, indiacode, sebi, brave*, tavily*, google*  (* = API key required)
 
 Examples:
   search100x "GDPR right to erasure"
@@ -64,24 +72,32 @@ Examples:
     process.exit(0);
   }
 
-  let query      = "";
-  let limit      = 10;
+  let query         = "";
+  let limit         = 10;
   let sources: SourceName[] | undefined;
   let scope: string[] | undefined;
-  let jsonOutput = false;
-  let enrichTopN = 0;
-  let stream     = false;
-  let region     = process.env.NEWS_REGION ?? "US";
+  let jsonOutput    = false;
+  let enrichTopN    = 0;
+  let stream        = false;
+  let region        = process.env.NEWS_REGION ?? "US";
+  let minEngines: number | undefined;
+  let maxWaitMs: number | undefined;
+  let deep: boolean | undefined;
+  let noEarlyReturn: boolean | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (!a.startsWith("--")) { query = a; continue; }
-    if (a === "--limit")   { limit = Number(args[++i]); continue; }
-    if (a === "--sources") { sources = args[++i].split(",") as SourceName[]; continue; }
-    if (a === "--region")  { region = args[++i].toUpperCase(); continue; }
-    if (a === "--json")    { jsonOutput = true; continue; }
-    if (a === "--enrich")  { enrichTopN = Number(args[++i]); continue; }
-    if (a === "--stream")  { stream = true; continue; }
+    if (a === "--limit")           { limit = Number(args[++i]); continue; }
+    if (a === "--sources")         { sources = args[++i].split(",") as SourceName[]; continue; }
+    if (a === "--region")          { region = args[++i].toUpperCase(); continue; }
+    if (a === "--json")            { jsonOutput = true; continue; }
+    if (a === "--enrich")          { enrichTopN = Number(args[++i]); continue; }
+    if (a === "--stream")          { stream = true; continue; }
+    if (a === "--min-engines")     { minEngines = Number(args[++i]); continue; }
+    if (a === "--max-wait")        { maxWaitMs = Number(args[++i]); continue; }
+    if (a === "--deep")            { deep = true; continue; }
+    if (a === "--no-early-return") { noEarlyReturn = true; continue; }
     if (a === "--preset") {
       const name = args[++i];
       if (!DOMAIN_PRESETS[name]) {
@@ -102,7 +118,7 @@ Examples:
     process.exit(1);
   }
 
-  return { query, limit, sources, scope, jsonOutput, enrichTopN, stream, region };
+  return { query, limit, sources, scope, jsonOutput, enrichTopN, stream, region, minEngines, maxWaitMs, deep, noEarlyReturn };
 }
 
 function printResult(
@@ -120,18 +136,18 @@ function printResult(
 }
 
 async function main(): Promise<void> {
-  const { query, limit, sources, scope, jsonOutput, enrichTopN, stream, region } = parseArgs(process.argv);
+  const { query, limit, sources, scope, jsonOutput, enrichTopN, stream, region, minEngines, maxWaitMs, deep, noEarlyReturn } = parseArgs(process.argv);
 
   const s = new EnhancedSearch({
     braveApiKey:  process.env.BRAVE_API_KEY,
     tavilyApiKey: process.env.TAVILY_API_KEY,
     googleApiKey: process.env.GOOGLE_API_KEY,
     googleCx:     process.env.GOOGLE_CX,
-    timeoutMs:    8000,
+    timeoutMs:    10000,
     newsRegion:   region,
   });
 
-  const opts = { limit, sources, scopedDomains: scope, enrichTopN };
+  const opts = { limit, sources, scopedDomains: scope, enrichTopN, minEngines, maxWaitMs, deep, noEarlyReturn };
 
   if (stream && !jsonOutput) {
     console.log(`\nSearching: "${query}" (streaming)\n${"─".repeat(70)}`);

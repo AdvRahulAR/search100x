@@ -168,6 +168,10 @@ export class DuckDuckGoEngine implements Engine {
       results.push({ title, url, snippet });
     }
 
+    if (results.length === 0) {
+      this.logger?.warn(`[duckduckgo] 0 results parsed from response (possible rate-limiting or layout change)`);
+    }
+
     return results;
   }
 }

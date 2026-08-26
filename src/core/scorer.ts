@@ -159,9 +159,11 @@ export const ENGINE_WEIGHTS: Record<string, number> = {
   bingnews:   0.75,
   wikipedia:  0.80,
   openalex:   0.70,
-  // SearXNG aggregates ~70 sub-engines; base weight reflects that it's one HTTP
-  // call, but the sub-engine consensus bonus in container.ts boosts confirmed results.
-  searxng:    0.90,
+  // SearXNG aggregates ~70 sub-engines; high priority for multi-engine consensus
+  searxng:    1.30,
+  // Indian legal and compliance databases
+  indiacode:  1.10,
+  sebi:       1.10,
   // Live-data adapters: always rank first when present — real data > indexed pages
   openmeteo:  1.00,
 };
