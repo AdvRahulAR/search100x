@@ -54,7 +54,7 @@ async function request(
       // Silently note — log via console.warn so it appears in debug but doesn't break
       const originalHost = u.hostname;
       const finalHost = new URL(res.url).hostname;
-      if (originalHost !== finalHost) {
+      if (originalHost !== finalHost && process.env.DEBUG) {
         console.warn(`[search100x] ${method} ${originalHost} redirected to ${finalHost} — possible bot detection`);
       }
     }

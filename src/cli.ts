@@ -148,6 +148,7 @@ async function main(): Promise<void> {
     googleCx:     process.env.GOOGLE_CX,
     timeoutMs:    10000,
     newsRegion:   region,
+    logger:       process.env.DEBUG ? undefined : { warn: () => {}, log: () => {}, debug: () => {} },
   });
 
   const opts = { limit, sources, scopedDomains: scope, enrichTopN, minEngines, maxWaitMs, deep, noEarlyReturn, scoringPreset };

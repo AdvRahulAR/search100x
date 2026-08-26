@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.2.2] - 2026-08-27
+
+### Fixed
+- **Clean CLI Output**: Silenced adapter diagnostics and internal redirect logs in standard CLI runs (enabled only with `DEBUG=1`).
+
+---
+
 ## [3.2.1] - 2026-08-27
 
 ### Fixed
