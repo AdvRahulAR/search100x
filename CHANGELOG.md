@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0] - 2026-08-31
+
+### Added
+- **Built-in Model Context Protocol (MCP) Server** (`src/mcp.ts`): Standard JSON-RPC 2.0 stdio MCP server for direct integration with Claude Desktop, Cursor, Windsurf, and any MCP client via `npx search100x --mcp`. Exposes `web_search`, `legal_search`, `fetch_page_content`, and `list_domain_presets` tools.
+- **Stealth & Browser Profile Rotation** (`src/core/stealth.ts`): Centralized User-Agent rotation simulating realistic modern browser headers (`sec-ch-ua`, `sec-ch-ua-platform`, `sec-ch-ua-mobile`) with session pinning for VQD token persistence.
+- **Per-Domain Rate Limiting**: Token-bucket rate limiter avoiding burst IP blocks on legal portals and scraping engines.
+- **Legal Accuracy & Citation Tokenizer** (`src/core/bm25.ts`): Added UK/EU legal citation patterns, Porter stemming (`stemToken`), and legal statute transitions (IPC ↔ BNS, CrPC ↔ BNSS, Evidence Act ↔ BSA).
+- **Structure-Preserving Extractor** (`src/core/extractor.ts`): Converts legal tables into clean markdown tables and preserves ordered list numbering.
+- **Legal Document Boosting & Authority** (`src/core/scorer.ts`, `src/core/reputation.ts`): Primary legislation and court portals receive targeted boosts; added subdomain matching and runtime `customDomainBoosts`.
+
+### Fixed
+- **HTTP Client Hardening** (`src/core/http.ts`): Fixed `any` to strict `unknown`, added proactive SSRF checks, added exponential backoff retry loop (429/503/408), and fixed form URL-encoded POST serialization for SEBI.
+- **Circuit Breaker Deadlock**: Fixed `HALF_OPEN` trial request timeout with a 15-second safety timer and added rapid bot challenge backoff escalation.
+- **DOM Parsers**: Converted `IndiaCode` and `SEBI` from regex to DOM-based parsing via `node-html-parser`.
+
 ---
 
 ## [3.2.2] - 2026-08-27

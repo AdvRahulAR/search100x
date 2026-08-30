@@ -95,6 +95,16 @@ const COMPOUND_PATTERNS: RegExp[] = [
   /\(\d{4}\)\s*\d{1,3}\s*itr\s+\d+/gi,
   /\(\d{4}\)\s*\d{1,3}\s*taxman\s+\d+/gi,
   /\b\d{4}\s+gst\s+\d+\b/gi,
+  // UK citations
+  /\[\d{4}\]\s*UKSC\s+\d+/gi,
+  /\[\d{4}\]\s*UKHL\s+\d+/gi,
+  /\[\d{4}\]\s*EWCA\s+(?:Civ|Crim)\s+\d+/gi,
+  /\[\d{4}\]\s*EWHC\s+\d+/gi,
+  /\[\d{4}\]\s*UKPC\s+\d+/gi,
+  // EU citations
+  /\bCase\s+C-\d+\/\d{2}/gi,
+  /\bECLI:[A-Z]{2}:[A-Z]+:\d{4}:\d+/gi,
+  /\bCase\s+T-\d+\/\d{2}/gi,
 ];
 
 const LEGAL_PHRASES: RegExp[] = [
@@ -160,7 +170,8 @@ export function tokenize(text: string): string[] {
   const genericTokens = working
     .replace(/[^\w\s]/g, " ")
     .split(/\s+/)
-    .filter((t) => t.length > 1 && !STOPWORDS.has(t));
+    .filter((t) => t.length > 1 && !STOPWORDS.has(t))
+    .map(stemToken);
   return [...compounds, ...genericTokens];
 }
 
@@ -264,6 +275,14 @@ const CITATION_REGEXES: RegExp[] = [
   /\b\d+\s+fr\s+\d{2,6}/gi,
   /\bpub\.?\s*l\.?\s*\d+[\-–]\d+/gi,
   /\b\d+\s+stat\.?\s+\d+/gi,
+  // UK citations
+  /\[\d{4}\]\s*UKSC\s+\d+/gi,
+  /\[\d{4}\]\s*UKHL\s+\d+/gi,
+  /\[\d{4}\]\s*EWCA\s+(?:Civ|Crim)\s+\d+/gi,
+  /\[\d{4}\]\s*EWHC\s+\d+/gi,
+  // EU citations
+  /\bCase\s+C-\d+\/\d{2}/gi,
+  /\bECLI:[A-Z]{2}:[A-Z]+:\d{4}:\d+/gi,
 ];
 
 export function legalCitations(text: string): string[] {
@@ -279,4 +298,22 @@ export function legalCitations(text: string): string[] {
     }
   }
   return citations;
+}
+
+/** Lightweight Porter stemmer — handles common English suffixes */
+export function stemToken(word: string): string {
+  if (word.length <= 3) return word;
+  // Step 1: plurals and past tense
+  if (word.endsWith("ies") && word.length > 4) return word.slice(0, -3) + "y";
+  if (word.endsWith("sses")) return word.slice(0, -2);
+  if (word.endsWith("ness")) return word.slice(0, -4);
+  if (word.endsWith("ment")) return word.slice(0, -4);
+  if (word.endsWith("tion")) return word.slice(0, -4) + "t";
+  if (word.endsWith("ated")) return word.slice(0, -1);
+  if (word.endsWith("ling")) return word.slice(0, -3);
+  if (word.endsWith("ing") && word.length > 5) return word.slice(0, -3);
+  if (word.endsWith("ed") && word.length > 4) return word.slice(0, -2);
+  if (word.endsWith("ly") && word.length > 4) return word.slice(0, -2);
+  if (word.endsWith("s") && !word.endsWith("ss") && word.length > 3) return word.slice(0, -1);
+  return word;
 }

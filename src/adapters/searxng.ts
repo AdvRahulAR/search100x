@@ -27,6 +27,15 @@ import { http } from "../core/http.js";
 const DEFAULT_SEARXNG_BASE_URL = "https://searxng.replit.app";
 const DEFAULT_SEARXNG_TOKEN   = "40b5ea00de6d9c6bac9e3844ad1832d6b1a295464cee1c9b148a74fb6626cc63";
 
+interface SearXNGResultItem {
+  title?: string;
+  url?: string;
+  content?: string;
+  publisheddate?: string;
+  engines?: unknown[];
+  engine?: unknown;
+}
+
 export class SearXNGEngine implements Engine {
   readonly name = "searxng" as const;
 
@@ -60,9 +69,10 @@ export class SearXNGEngine implements Engine {
         responseType: "json",
       });
 
-      const items: any[] = res.data?.results ?? [];
+      const data = res.data as Record<string, unknown> | undefined;
+      const items = (data?.results as SearXNGResultItem[]) ?? [];
 
-      return items.map((r: any, i: number) => {
+      return items.map((r) => {
         let publishedAt: Date | undefined;
         if (r.publisheddate) {
           const d = new Date(r.publisheddate);

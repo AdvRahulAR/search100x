@@ -95,7 +95,7 @@ function mmrSelect(
     }
 
     const next = remaining.splice(bestIdx, 1)[0];
-    next.score = bestScore;
+    next.score = Math.max(0, bestScore);
     selected.push(next);
   }
 

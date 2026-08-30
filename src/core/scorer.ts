@@ -84,7 +84,29 @@ export function cascadeScore(
     weights.authority * urlAuthorityScore(url) +
     weights.recency   * recencyScore(publishedAt, halfLifeDays)
   );
-  return blended * spamMultiplier;
+  return blended * spamMultiplier * legalDocTypeBoost(url, weights === LEGAL_WEIGHTS);
+}
+
+/** Legal domain patterns for document type detection and boosting */
+const LEGAL_DOC_BOOST: { pattern: RegExp; boost: number; type: string }[] = [
+  // Primary legislation (.gov domains)
+  { pattern: /\.(gov|nic)\./, boost: 1.15, type: "legislation" },
+  // Court databases
+  { pattern: /indiankanoon\.org|courtlistener\.com|bailii\.org|curia\.europa\.eu/, boost: 1.10, type: "caselaw" },
+  // Regulatory bodies
+  { pattern: /sebi\.gov|sec\.gov|eur-lex\.europa/, boost: 1.05, type: "regulatory" },
+];
+
+/**
+ * Apply legal document type boost to a cascade score.
+ * Only effective when scoring preset is "legal".
+ */
+export function legalDocTypeBoost(url: string, isLegalPreset: boolean): number {
+  if (!isLegalPreset) return 1.0;
+  for (const { pattern, boost } of LEGAL_DOC_BOOST) {
+    if (pattern.test(url)) return boost;
+  }
+  return 1.0;
 }
 
 /**

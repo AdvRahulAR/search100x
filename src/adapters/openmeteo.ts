@@ -44,6 +44,21 @@ function extractCity(query: string): string {
     .trim();
 }
 
+interface NominatimLocation {
+  lat: string;
+  lon: string;
+  display_name: string;
+}
+
+interface OpenMeteoCurrentWeather {
+  temperature_2m: number;
+  relative_humidity_2m: number;
+  wind_speed_10m: number;
+  weather_code: number;
+  apparent_temperature: number;
+  precipitation: number;
+}
+
 export class OpenMeteoEngine implements Engine {
   readonly name = "openmeteo" as const;
 
@@ -65,7 +80,8 @@ export class OpenMeteoEngine implements Engine {
       headers: { "User-Agent": "search100x/2.2.0 (open-source search package)" },
     });
 
-    const loc = geo.data?.[0];
+    const geoData = geo.data as NominatimLocation[] | undefined;
+    const loc = geoData?.[0];
     if (!loc) return [];
 
     // Step 2: fetch current weather from Open-Meteo (free, no key, no rate limit)
@@ -80,7 +96,8 @@ export class OpenMeteoEngine implements Engine {
       },
     });
 
-    const c = wx.data?.current;
+    const wxData = wx.data as Record<string, unknown> | undefined;
+    const c = wxData?.current as OpenMeteoCurrentWeather | undefined;
     if (!c) return [];
 
     const desc    = WMO[c.weather_code as number] ?? "Unknown conditions";

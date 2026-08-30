@@ -12,6 +12,7 @@ import { rerankResults } from "./core/reranker.js";
 import { classifyQuery, detectLiveIntent } from "./core/classifier.js";
 import { reformulateQuery } from "./core/reformulator.js";
 import { defaultLogger, silentLogger } from "./core/logger.js";
+import { setCustomDomainBoosts } from "./core/reputation.js";
 
 // Adapters
 import { DuckDuckGoEngine } from "./adapters/duckduckgo.js";
@@ -71,6 +72,9 @@ export class EnhancedSearch {
     this.cache    = config.cache ?? new ResultCache();
     this.circuit  = new CircuitBreakerRegistry(this.logger);
     this.engineMap = this.initEngines();
+    if (config.customDomainBoosts) {
+      setCustomDomainBoosts(config.customDomainBoosts);
+    }
   }
 
   use(engine: Engine): this {

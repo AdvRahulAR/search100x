@@ -3,6 +3,7 @@ import { Engine } from "../core/engine.js";
 import { RawResult, Logger } from "../core/types.js";
 import { stripHtml, truncate } from "../core/normalizer.js";
 import { http } from "../core/http.js";
+import { getPinnedProfile, getStealthHeaders } from "../core/stealth.js";
 
 /**
  * DuckDuckGo Web — HTML no-JS endpoint, no API key required.
@@ -26,7 +27,6 @@ import { http } from "../core/http.js";
  */
 
 const DDG_URL    = "https://html.duckduckgo.com/html/";
-const STATIC_UA  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0";
 const VQD_TTL    = 60 * 60 * 1000; // 1 hour
 const VQD_MAX    = 200;             // max queries to cache per instance
 
@@ -34,16 +34,24 @@ const TIME_RANGE: Record<string, string> = {
   day: "d", week: "w", month: "m", year: "y",
 };
 
-const DDG_HEADERS = {
-  "User-Agent":      STATIC_UA,
-  "Content-Type":    "application/x-www-form-urlencoded",
-  Accept:            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  "Accept-Language": "en-US,en;q=0.5",
-  "Sec-Fetch-Dest":  "document",
-  "Sec-Fetch-Mode":  "navigate",
-  "Sec-Fetch-Site":  "same-origin",
-  Referer:           DDG_URL,
-};
+function getDdgHeaders(query: string): Record<string, string> {
+  const profile = getPinnedProfile(`ddg:${query}`);
+  return {
+    "User-Agent": profile.ua,
+    "Content-Type": "application/x-www-form-urlencoded",
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    Referer: DDG_URL,
+    ...(profile["sec-ch-ua"] ? {
+      "sec-ch-ua": profile["sec-ch-ua"],
+      "sec-ch-ua-platform": profile["sec-ch-ua-platform"],
+      "sec-ch-ua-mobile": profile["sec-ch-ua-mobile"],
+    } : {}),
+  };
+}
 
 export class DuckDuckGoEngine implements Engine {
   readonly name = "duckduckgo" as const;
@@ -104,7 +112,7 @@ export class DuckDuckGoEngine implements Engine {
 
     const res = await http.post(DDG_URL, form.toString(), {
       timeout: timeoutMs,
-      headers: DDG_HEADERS,
+      headers: getDdgHeaders(query),
       responseType: "text",
     });
 
@@ -120,7 +128,7 @@ export class DuckDuckGoEngine implements Engine {
 
       const retryRes = await http.post(DDG_URL, form.toString(), {
         timeout: Math.max(1000, timeoutMs - 2000),
-        headers: DDG_HEADERS,
+        headers: getDdgHeaders(query),
         responseType: "text",
       });
       const retryHtml = retryRes.data as string;

@@ -8,6 +8,14 @@ import { http } from "../core/http.js";
  * Returns pre-extracted, clean content (not raw HTML snippets).
  * Set TAVILY_API_KEY to enable.
  */
+interface TavilyResultItem {
+  title?: string;
+  url?: string;
+  content?: string;
+  snippet?: string;
+  score?: number;
+}
+
 export class TavilyEngine implements Engine {
   readonly name = "tavily" as const;
   constructor(private apiKey: string) {}
@@ -24,7 +32,8 @@ export class TavilyEngine implements Engine {
         },
       }
     );
-    const items: any[] = res.data?.results ?? [];
+    const data = res.data as Record<string, unknown> | undefined;
+    const items = (data?.results as TavilyResultItem[]) ?? [];
     return items.map((r) => ({
       title:   r.title ?? "",
       url:     r.url ?? "",

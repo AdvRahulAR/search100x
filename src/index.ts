@@ -66,3 +66,39 @@ export type { SsrfCheckResult, InjectionCheckResult } from "./core/security.js";
 export { classifySourceType, addProvenance } from "./core/fetcher.js";
 export { ENGINE_TIERS } from "./core/types.js";
 export type { QueryClassification } from "./core/types.js";
+
+// v4.0.0 exports — stealth, legal metadata, config, mcp
+export { getStealthHeaders, getRandomProfile, getPinnedProfile, RateLimiter, globalRateLimiter } from "./core/stealth.js";
+export type { BrowserProfile, RateLimitConfig } from "./core/stealth.js";
+export { stemToken } from "./core/bm25.js";
+export { legalDocTypeBoost } from "./core/scorer.js";
+export { setCustomDomainBoosts } from "./core/reputation.js";
+export type { LegalMetadata } from "./core/types.js";
+export { extractKeyEntities } from "./core/reformulator.js";
+export {
+  startMcpServer,
+  handleJsonRpcMessage,
+  handleToolCall,
+  MCP_TOOLS,
+  MCP_SERVER_NAME,
+  MCP_SERVER_VERSION,
+  MCP_PROTOCOL_VERSION,
+  MCP_DEFAULT_SEARCH_LIMIT,
+  MCP_MAX_SEARCH_LIMIT,
+  MCP_DEFAULT_FETCH_MAX_CHARS,
+  MCP_DEFAULT_FETCH_TIMEOUT_MS,
+  MCP_DEFAULT_SEARCH_TIMEOUT_MS,
+  JURISDICTION_TO_PRESET_MAP,
+} from "./mcp.js";
+export type {
+  McpServerOptions,
+  McpServerInstance,
+  JsonRpcRequest,
+  JsonRpcResponse,
+  McpToolDefinition,
+  McpToolInputSchema,
+  McpToolProperty,
+  McpTextContent,
+  McpToolCallResult,
+} from "./mcp.js";
+

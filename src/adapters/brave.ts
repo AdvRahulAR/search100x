@@ -25,11 +25,13 @@ export class BraveEngine implements Engine {
         "X-Subscription-Token": this.apiKey,
       },
     });
-    const items: any[] = res.data?.web?.results ?? [];
+    const data = res.data as Record<string, unknown> | undefined;
+    const web = data?.web as Record<string, unknown> | undefined;
+    const items = (web?.results as Array<Record<string, unknown>>) ?? [];
     return items.map((r) => ({
-      title:   r.title ?? "",
-      url:     r.url ?? "",
-      snippet: truncate(stripHtml(r.extra_snippets?.[0] ?? r.description ?? "")),
+      title:   (r.title as string) ?? "",
+      url:     (r.url as string) ?? "",
+      snippet: truncate(stripHtml(((r.extra_snippets as string[] | undefined)?.[0] ?? (r.description as string) ?? ""))),
     }));
   }
 }

@@ -14,11 +14,12 @@ export class GoogleEngine implements Engine {
     url.searchParams.set("q", query);
     url.searchParams.set("num", "10");
     const res = await http.get(url.toString(), { timeout: timeoutMs });
-    const items: any[] = res.data?.items ?? [];
+    const data = res.data as Record<string, unknown> | undefined;
+    const items = (data?.items as Array<Record<string, unknown>>) ?? [];
     return items.map((r) => ({
-      title:   r.title ?? "",
-      url:     r.link ?? "",
-      snippet: truncate(stripHtml(r.snippet ?? "")),
+      title:   (r.title as string) ?? "",
+      url:     (r.link as string) ?? "",
+      snippet: truncate(stripHtml((r.snippet as string) ?? "")),
     }));
   }
 }

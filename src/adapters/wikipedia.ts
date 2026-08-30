@@ -6,7 +6,9 @@ import { http, HttpError } from "../core/http.js";
 async function fetchWithRetry(url: string, timeoutMs: number, attempt = 0): Promise<RawResult[]> {
   try {
     const res = await http.get(url, { timeout: timeoutMs });
-    const items: Array<{ title: string; snippet: string }> = res.data?.query?.search ?? [];
+    const data = res.data as Record<string, unknown> | undefined;
+    const query = data?.query as Record<string, unknown> | undefined;
+    const items: Array<{ title: string; snippet: string }> = (query?.search as Array<{ title: string; snippet: string }>) ?? [];
     return items.map((r) => ({
       title:   r.title,
       url:     `https://en.wikipedia.org/wiki/${encodeURIComponent(r.title.replace(/ /g, "_"))}`,

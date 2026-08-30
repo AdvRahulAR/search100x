@@ -17,6 +17,7 @@ const FAILURE_THRESHOLD = 3;
 const WINDOW_MS         = 60_000;      // 1-minute rolling failure window
 const MAX_COOLDOWN_MS   = 10 * 60_000; // 10 minutes max cooldown
 const BASE_COOLDOWN_MS  = 30_000;      // 30s initial cooldown (exponential backoff)
+const HALF_OPEN_SAFETY_TIMEOUT = 15_000;
 
 export type BreakerState = "CLOSED" | "OPEN" | "HALF_OPEN";
 
@@ -25,6 +26,7 @@ interface Breaker {
   failures:            number[];  // timestamps of recent failures
   openedAt:            number;
   halfOpenTrialActive: boolean;
+  halfOpenTrialStartedAt: number;
   consecutiveOpens:    number;  // for exponential backoff calculation
 }
 
@@ -40,6 +42,7 @@ export class CircuitBreakerRegistry {
         failures: [],
         openedAt: 0,
         halfOpenTrialActive: false,
+        halfOpenTrialStartedAt: 0,
         consecutiveOpens: 0,
       });
     }
@@ -49,6 +52,12 @@ export class CircuitBreakerRegistry {
   /** Returns true if this engine should be skipped for the current request */
   isOpen(engine: string): boolean {
     const b = this.get(engine);
+    
+    if (b.state === "HALF_OPEN" && b.halfOpenTrialActive && (Date.now() - b.halfOpenTrialStartedAt) > HALF_OPEN_SAFETY_TIMEOUT) {
+      this.recordFailure(engine);
+      return true;
+    }
+
     if (b.state === "CLOSED") return false;
 
     if (b.state === "OPEN") {
@@ -68,6 +77,7 @@ export class CircuitBreakerRegistry {
     // HALF_OPEN: allow exactly one trial
     if (b.halfOpenTrialActive) return true;
     b.halfOpenTrialActive = true;
+    b.halfOpenTrialStartedAt = Date.now();
     return false;
   }
 
@@ -103,6 +113,11 @@ export class CircuitBreakerRegistry {
     }
   }
 
+  recordBotDetection(engine: string): void {
+    const b = this.get(engine);
+    b.consecutiveOpens += 2;
+    this.recordFailure(engine);
+  }
 
   status(): Record<string, { state: BreakerState; failures: number }> {
     const out: Record<string, { state: BreakerState; failures: number }> = {};

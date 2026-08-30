@@ -21,11 +21,12 @@ export class MarginaliaEngine implements Engine {
       },
     });
 
-    const items: any[] = res.data?.results ?? [];
+    const data = res.data as Record<string, unknown> | undefined;
+    const items = (data?.results as Array<Record<string, unknown>>) ?? [];
     return items.map((r) => ({
-      title:   r.title ?? "",
-      url:     r.url ?? "",
-      snippet: truncate(r.description ?? ""),
+      title:   (r.title as string) ?? "",
+      url:     (r.url as string) ?? "",
+      snippet: truncate((r.description as string) ?? ""),
     }));
   }
 }

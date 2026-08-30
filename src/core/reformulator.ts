@@ -12,6 +12,18 @@ const LEGAL_STATUTE_PATTERNS = [
   /\b(Supreme Court|High Court|Tribunal)\b/gi,
 ];
 
+/** Indian law transition synonyms — old acts ↔ new acts */
+const LEGAL_SYNONYMS: Record<string, string[]> = {
+  "ipc":          ["bharatiya nyaya sanhita", "bns"],
+  "bns":          ["indian penal code", "ipc"],
+  "crpc":         ["bharatiya nagarik suraksha sanhita", "bnss"],
+  "bnss":         ["code of criminal procedure", "crpc"],
+  "evidence act": ["bharatiya sakshya adhiniyam", "bsa"],
+  "bsa":          ["indian evidence act", "evidence act"],
+  "sec":          ["section"],
+  "section":      ["sec"],
+};
+
 /**
  * Extracts high-signal legal instruments and institutional entities from a query.
  */
@@ -72,7 +84,8 @@ export function reformulateQuery(query: string): string[] {
       // Remove entities from remainder to get keywords
       let remainder = trimmed;
       for (const e of entities) {
-        remainder = remainder.replace(new RegExp(e, "gi"), " ");
+        const escaped = e.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        remainder = remainder.replace(new RegExp(escaped, "gi"), " ");
       }
       const coreKeywords = remainder
         .replace(/[^a-zA-Z0-9\s]/g, "")
@@ -85,6 +98,18 @@ export function reformulateQuery(query: string): string[] {
       if (keyphraseQuery && keyphraseQuery !== trimmed) {
         results.push(keyphraseQuery);
       }
+    }
+  }
+
+  // 3.5 Legal synonym expansion
+  for (const [term, alts] of Object.entries(LEGAL_SYNONYMS)) {
+    const termRegex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    if (termRegex.test(lower) && alts.length > 0) {
+      const expanded = trimmed.replace(termRegex, alts[0]);
+      if (expanded !== trimmed && !results.includes(expanded)) {
+        results.push(expanded);
+      }
+      break; // Only one legal synonym expansion per query
     }
   }
 

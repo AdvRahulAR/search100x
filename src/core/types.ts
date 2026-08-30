@@ -70,7 +70,7 @@ export const ENGINE_TIERS = {
 export type QueryClassification = "news" | "legal" | "academic" | "general";
 
 /** Coarse category of a search result — set by the engine that found it. */
-export type ResultType = "web" | "news" | "academic" | "encyclopedia";
+export type ResultType = "web" | "news" | "academic" | "encyclopedia" | "legal";
 
 export interface SearchResult {
   title:    string;
@@ -89,6 +89,18 @@ export interface SearchResult {
   publishedAt?: Date;
   /** Coarse result category set by the engine: web / news / academic / encyclopedia. */
   type?: ResultType;
+  legalMeta?: LegalMetadata;
+}
+
+export interface LegalMetadata {
+  court?: string;
+  bench?: string[];
+  caseNumber?: string;
+  citation?: string;
+  dateOfJudgment?: Date;
+  actTitle?: string;
+  sectionNumber?: string;
+  documentType?: "judgment" | "statute" | "circular" | "regulation" | "order";
 }
 
 export interface SearXNGConfig {
@@ -110,6 +122,10 @@ export interface SearchConfig {
   googleApiKey?: string;
   googleCx?: string;
   timeoutMs?: number;
+  /** HTTP/HTTPS proxy URL for all outbound requests */
+  proxy?: string;
+  /** Custom domain authority overrides — merged with built-in domain scores */
+  customDomainBoosts?: Record<string, number>;
   /**
    * ISO 3166-1 alpha-2 country code used by news engines and Bing market.
    * Examples: "US", "IN", "GB", "DE", "AU". Defaults to "US".
@@ -124,6 +140,7 @@ export interface SearchConfig {
   searxng?: SearXNGConfig;
   logger?: Logger;
 }
+
 
 /**
  * Time-range filter passed to engines that support native freshness parameters.

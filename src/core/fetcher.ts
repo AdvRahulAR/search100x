@@ -24,62 +24,7 @@ import { http } from "./http.js";
 import { bm25Scores, legalCitations } from "./bm25.js";
 import { extractContent } from "./extractor.js";
 import { SearchResult, ResultType } from "./types.js";
-
-const FETCH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0";
-
-// ── UA rotation with Sec-Ch-Ua headers (from open-us-law http_client.py) ──────
-// Government portals check for Chrome UA + Sec-Ch-Ua headers. Rotating across
-// 4 browser profiles improves fetch success rate by ~15-20% on .gov sites.
-
-interface BrowserProfile {
-  ua: string;
-  "sec-ch-ua": string;
-  "sec-ch-ua-platform": string;
-  "sec-ch-ua-mobile": string;
-}
-
-const BROWSER_PROFILES: BrowserProfile[] = [
-  {
-    ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-    "sec-ch-ua-platform": '"Windows"',
-    "sec-ch-ua-mobile": "?0",
-  },
-  {
-    ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-    "sec-ch-ua-platform": '"macOS"',
-    "sec-ch-ua-mobile": "?0",
-  },
-  {
-    ua: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-    "sec-ch-ua-platform": '"Linux"',
-    "sec-ch-ua-mobile": "?0",
-  },
-  {
-    ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-    "sec-ch-ua": '"Google Chrome";v="130", "Chromium";v="130", "Not_A Brand";v="24"',
-    "sec-ch-ua-platform": '"Windows"',
-    "sec-ch-ua-mobile": "?0",
-  },
-];
-
-function randomProfile(): BrowserProfile {
-  return BROWSER_PROFILES[Math.floor(Math.random() * BROWSER_PROFILES.length)];
-}
-
-function fetchHeaders(): Record<string, string> {
-  const p = randomProfile();
-  return {
-    "User-Agent": p.ua,
-    "sec-ch-ua": p["sec-ch-ua"],
-    "sec-ch-ua-platform": p["sec-ch-ua-platform"],
-    "sec-ch-ua-mobile": p["sec-ch-ua-mobile"],
-    Accept: "text/html,application/xhtml+xml",
-    "Accept-Language": "en-US,en;q=0.9",
-  };
-}
+import { getStealthHeaders, getRandomProfile } from "./stealth.js";
 
 const NOISE_SELECTORS = [
   "script", "style", "noscript",
@@ -97,8 +42,6 @@ const CONTENT_SELECTORS = [
   ".post-content", ".entry-content", ".article-body",
   ".prose", ".markdown-body",
 ];
-
-const FETCH_HEADERS = fetchHeaders();
 
 // ── WAF / bot-detection guard (from open-us-law + open-india-law) ─────────────
 // Cloudflare challenge pages, Indian WAF blocks, and CAPTCHA pages must not be
@@ -154,7 +97,7 @@ async function resolveGoogleNewsUrl(googleNewsUrl: string, timeoutMs: number): P
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     const res = await fetch(googleNewsUrl, {
-      headers: fetchHeaders(),
+      headers: getStealthHeaders(),
       signal: ctrl.signal,
       redirect: "manual",
     });
@@ -169,7 +112,7 @@ async function resolveGoogleNewsUrl(googleNewsUrl: string, timeoutMs: number): P
     const ctrl2 = new AbortController();
     const timer2 = setTimeout(() => ctrl2.abort(), timeoutMs);
     const res2 = await fetch(googleNewsUrl, {
-      headers: fetchHeaders(),
+      headers: getStealthHeaders(),
       signal: ctrl2.signal,
       redirect: "follow",
     });
@@ -203,7 +146,7 @@ async function fetchCleanText(url: string, timeoutMs: number): Promise<string | 
 
     const res = await http.get(url, {
       timeout: timeoutMs,
-      headers: fetchHeaders(),
+      headers: getStealthHeaders(),
       responseType: "text",
     });
 

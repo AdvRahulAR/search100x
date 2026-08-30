@@ -13,6 +13,11 @@ const BOOST_DOMAINS: Record<string, number> = {
   "indiacode.nic.in": 0.95, "legislative.gov.in": 0.93, "sebi.gov.in": 0.90,
   "rbi.org.in": 0.90, "irdai.gov.in": 0.88, "trai.gov.in": 0.85,
   "mca.gov.in": 0.95, "ibbi.gov.in": 0.92,
+  "doj.gov.in": 0.93, "njdg.ecourts.gov.in": 0.90,
+  "districts.ecourts.gov.in": 0.88, "nclat.nic.in": 0.90,
+  "tdsat.gov.in": 0.88, "nclt.gov.in": 0.90,
+  "cbdt.gov.in": 0.88, "cbic.gov.in": 0.88,
+  "egazette.gov.in": 0.93, "latestlaws.com": 0.85,
   // Indian legal news / commentary / case law reporters
   "livelaw.in": 0.98, "barandbench.com": 0.98, "scconline.com": 0.98,
   "thehindu.com": 0.90, "indianexpress.com": 0.90, "scobserver.in": 0.98,
@@ -39,13 +44,41 @@ function getBaseTldScore(host: string): number {
   return 0.50;
 }
 
+let customBoosts: Record<string, number> = {};
+
+/** Set custom domain authority overrides — merged with built-in boosts */
+export function setCustomDomainBoosts(boosts: Record<string, number>): void {
+  customBoosts = { ...boosts };
+}
+
 export function domainReputation(url: string): number {
   try {
     const host = new URL(url).hostname.replace(/^www\./, "");
+    // Exact match first
+    if (host in customBoosts) {
+      const target = customBoosts[host];
+      const base = getBaseTldScore(host);
+      return target / base;
+    }
     if (host in BOOST_DOMAINS) {
       const target = BOOST_DOMAINS[host];
       const base = getBaseTldScore(host);
       return target / base;
+    }
+    // Try parent domain (e.g., docs.scconline.com → scconline.com)
+    const parts = host.split(".");
+    if (parts.length > 2) {
+      const parent = parts.slice(1).join(".");
+      if (parent in customBoosts) {
+        const target = customBoosts[parent];
+        const base = getBaseTldScore(host);
+        return target / base;
+      }
+      if (parent in BOOST_DOMAINS) {
+        const target = BOOST_DOMAINS[parent];
+        const base = getBaseTldScore(host);
+        return target / base;
+      }
     }
   } catch {
     // ignore

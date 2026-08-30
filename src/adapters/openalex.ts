@@ -12,6 +12,19 @@ function reconstructAbstract(inv?: Record<string, number[]>): string {
   return pos.sort((a, b) => a[0] - b[0]).map(([, w]) => w).join(" ");
 }
 
+interface OpenAlexWork {
+  title?: string;
+  doi?: string;
+  publication_date?: string;
+  cited_by_count?: number;
+  open_access?: { oa_url?: string };
+  primary_location?: {
+    landing_page_url?: string;
+    source?: { display_name?: string };
+  };
+  abstract_inverted_index?: Record<string, number[]>;
+}
+
 export class OpenAlexEngine implements Engine {
   readonly name = "openalex" as const;
 
@@ -24,7 +37,8 @@ export class OpenAlexEngine implements Engine {
       timeout: timeoutMs,
       headers: { "User-Agent": "search100x/1.0 (mailto:prathibhatgl@gmail.com)" },
     });
-    const works: any[] = res.data?.results ?? [];
+    const data = res.data as Record<string, unknown> | undefined;
+    const works = (data?.results as OpenAlexWork[]) ?? [];
     return works
       .filter((w) => w.title && (w.open_access?.oa_url || w.primary_location?.landing_page_url || w.doi))
       .map((w) => {
@@ -36,7 +50,7 @@ export class OpenAlexEngine implements Engine {
         const journal    = w.primary_location?.source?.display_name ?? "";
         const citations  = w.cited_by_count ?? 0;
         const snippet    = truncate(`${journal && year ? `[${journal}, ${year}]` : ""} ${abstract || w.title} ${citations > 0 ? `Cited ${citations}×` : ""}`.trim());
-        return { title: w.title, url: articleUrl, snippet };
+        return { title: w.title ?? "", url: articleUrl, snippet };
       });
   }
 }

@@ -12,6 +12,8 @@
 import { Engine } from "../core/engine.js";
 import { RawResult } from "../core/types.js";
 import { http } from "../core/http.js";
+import { parse } from "node-html-parser";
+import { getStealthHeaders } from "../core/stealth.js";
 
 const INDIACODE_BASE = "https://www.indiacode.nic.in";
 const SEARCH_URL = `${INDIACODE_BASE}/search`;
@@ -30,13 +32,7 @@ export class IndiaCodeEngine implements Engine {
 
       const res = await http.get(url.toString(), {
         timeout: timeoutMs,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
-          "Accept": "text/html",
-          "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131"',
-          "sec-ch-ua-platform": '"Windows"',
-          "sec-ch-ua-mobile": "?0",
-        },
+        headers: getStealthHeaders(),
         responseType: "text",
       });
 
@@ -50,20 +46,23 @@ export class IndiaCodeEngine implements Engine {
   }
 
   private parseSearchResults(html: string, query: string): RawResult[] {
+    const root = parse(html);
     const results: RawResult[] = [];
-    // Look for act listing links
-    const actPattern = /<a[^>]+href="([^"]*act[^"]*)"[^>]*>([^<]+)<\/a>/gi;
-    let match;
-    while ((match = actPattern.exec(html)) !== null && results.length < 10) {
-      const url = match[1].startsWith("http") ? match[1] : `${INDIACODE_BASE}/${match[1].replace(/^\//, "")}`;
-      const title = match[2].trim();
-      if (title.length > 5) {
-        results.push({
-          title,
-          url,
-          snippet: `Indian legislation: ${title}. Available on India Code (indiacode.nic.in).`,
-        });
-      }
+    // Try multiple selectors for IndiaCode search result links
+    const links = root.querySelectorAll('a[href*="act"], a[href*="Act"], a[href*="show-data"]');
+    for (const link of links) {
+      if (results.length >= 10) break;
+      const href = link.getAttribute("href") ?? "";
+      const title = link.text.trim();
+      if (!title || title.length <= 5 || !href) continue;
+      // Skip navigation/menu links
+      if (href.includes("javascript:") || href.startsWith("#")) continue;
+      const url = href.startsWith("http") ? href : `${INDIACODE_BASE}/${href.replace(/^\//, "")}`;
+      results.push({
+        title,
+        url,
+        snippet: `Indian legislation: ${title}. Available on India Code (indiacode.nic.in).`,
+      });
     }
     return results;
   }
@@ -81,15 +80,16 @@ export class SebiEngine implements Engine {
   async search(query: string, timeoutMs: number): Promise<RawResult[]> {
     try {
       const url = new URL("https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doSearch=yes");
-      const res = await http.post(url.toString(), {
-        searchQuery: query,
-        searchSelect: "all",
-      }, {
+      const form = new URLSearchParams();
+      form.set("searchQuery", query);
+      form.set("searchSelect", "all");
+      const res = await http.post(url.toString(), form.toString(), {
         timeout: timeoutMs,
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+          ...getStealthHeaders(),
           "Content-Type": "application/x-www-form-urlencoded",
         },
+        responseType: "text",
       });
 
       if (typeof res.data !== "string") return [];
@@ -100,15 +100,20 @@ export class SebiEngine implements Engine {
   }
 
   private parseResults(html: string): RawResult[] {
+    const root = parse(html);
     const results: RawResult[] = [];
-    const linkPattern = /<a[^>]+href="([^"]*(?:circular|order|regulation)[^"]*)"[^>]*>([^<]+)<\/a>/gi;
-    let match;
-    while ((match = linkPattern.exec(html)) !== null && results.length < 10) {
-      const url = match[1].startsWith("http") ? match[1] : `https://www.sebi.gov.in${match[1]}`;
+    const links = root.querySelectorAll('a[href*="circular"], a[href*="order"], a[href*="regulation"], a[href*="Circular"], a[href*="Order"]');
+    for (const link of links) {
+      if (results.length >= 10) break;
+      const href = link.getAttribute("href") ?? "";
+      const title = link.text.trim();
+      if (!title || title.length <= 5 || !href) continue;
+      if (href.includes("javascript:") || href.startsWith("#")) continue;
+      const url = href.startsWith("http") ? href : `https://www.sebi.gov.in/${href.replace(/^\//, "")}`;
       results.push({
-        title: match[2].trim(),
+        title,
         url,
-        snippet: `SEBI regulation: ${match[2].trim()}`,
+        snippet: `SEBI regulation/circular: ${title}`,
       });
     }
     return results;

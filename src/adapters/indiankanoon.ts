@@ -3,9 +3,9 @@ import { Engine } from "../core/engine.js";
 import { RawResult } from "../core/types.js";
 import { stripHtml, truncate } from "../core/normalizer.js";
 import { http } from "../core/http.js";
+import { getStealthHeaders } from "../core/stealth.js";
 
 const KANOON_BASE = "https://indiankanoon.org";
-const STATIC_UA   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36";
 
 export class IndianKanoonEngine implements Engine {
   readonly name = "indiankanoon" as const;
@@ -26,11 +26,7 @@ export class IndianKanoonEngine implements Engine {
 
       const res = await http.get(url.toString(), {
         timeout: timeoutMs,
-        headers: {
-          "User-Agent": STATIC_UA,
-          Accept: "text/html,application/xhtml+xml",
-          "Accept-Language": "en-US,en;q=0.9",
-        },
+        headers: getStealthHeaders(),
         responseType: "text",
       });
 

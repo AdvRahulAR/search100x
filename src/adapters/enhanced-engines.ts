@@ -15,7 +15,9 @@ import { stripHtml, truncate } from "../core/normalizer.js";
 async function fetchWithRetry(url: string, timeoutMs: number, attempt = 0): Promise<RawResult[]> {
   try {
     const res = await http.get(url, { timeout: timeoutMs });
-    const items: Array<{ title: string; snippet: string }> = res.data?.query?.search ?? [];
+    const data = res.data as Record<string, unknown> | undefined;
+    const query = data?.query as Record<string, unknown> | undefined;
+    const items: Array<{ title: string; snippet: string }> = (query?.search as Array<{ title: string; snippet: string }>) ?? [];
     return items.map((r) => ({
       title: r.title,
       url: `https://en.wikipedia.org/wiki/${encodeURIComponent(r.title.replace(/ /g, "_"))}`,
@@ -52,7 +54,8 @@ export class WikipediaFullTextEngine implements Engine {
           const extractUrl = new URL("https://en.wikipedia.org/api/rest_v1/page/summary/" +
             encodeURIComponent(r.title.replace(/ /g, "_")));
           const extractRes = await http.get(extractUrl.toString(), { timeout: 3000 });
-          const extract = extractRes.data?.extract;
+          const extractData = extractRes.data as Record<string, unknown> | undefined;
+          const extract = extractData?.extract as string | undefined;
           if (extract && extract.length > r.snippet.length) {
             r.snippet = extract;
           }

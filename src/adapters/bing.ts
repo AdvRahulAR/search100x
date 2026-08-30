@@ -3,6 +3,7 @@ import { Engine } from "../core/engine.js";
 import { RawResult } from "../core/types.js";
 import { stripHtml, truncate } from "../core/normalizer.js";
 import { http } from "../core/http.js";
+import { getStealthHeaders, getRandomProfile } from "../core/stealth.js";
 
 /**
  * Bing Web — HTML scraper, no API key required.
@@ -72,14 +73,10 @@ export class BingEngine implements Engine {
       params,
       timeout: timeoutMs,
       headers: {
-        "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:151.0) Gecko/20100101 Firefox/151.0",
-        Accept:            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
+        ...getStealthHeaders(),
         "Accept-Encoding": "gzip, deflate, br",
-        Connection:        "keep-alive",
-        "Sec-Fetch-Dest":  "document",
-        "Sec-Fetch-Mode":  "navigate",
-        "Sec-Fetch-Site":  "none",
+        Connection: "keep-alive",
+        "Sec-Fetch-Site": "none",
       },
       responseType: "text",
     });

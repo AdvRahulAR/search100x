@@ -72,12 +72,25 @@ function isBoilerplate(text: string): boolean {
 }
 
 /**
+ * Detect if a page is likely a legal document based on URL and content signals
+ */
+function isLegalDocument(url: string, html: string): boolean {
+  // URL-based detection
+  if (/indiankanoon\.org|indiacode\.nic\.in|sebi\.gov\.in|legislation\.gov\.uk|eur-lex\.europa\.eu|law\.cornell\.edu|courtlistener\.com/.test(url)) {
+    return true;
+  }
+  // Content-based detection (check first 2000 chars)
+  const sample = html.slice(0, 2000).toLowerCase();
+  return /\b(judgment|order|petition|appellant|respondent|hon'ble|honourable|bench|versus|\bv\.?s?\.?\b.*court)/.test(sample);
+}
+
+/**
  * Extract clean text from HTML using the trafilatura-style cascade.
  *
  * @param html Raw HTML string
  * @returns Cleaned text or undefined if extraction fails
  */
-export function extractContent(html: string): string | undefined {
+export function extractContent(html: string, url?: string): string | undefined {
   if (!html || html.length < 50) return undefined;
 
   try {
@@ -86,6 +99,29 @@ export function extractContent(html: string): string | undefined {
     // Stage 1: Remove noise elements
     for (const sel of NOISE_SELECTORS) {
       root.querySelectorAll(sel).forEach((n) => n.remove());
+    }
+
+    // Stage 1.5: Preserve tables and lists for legal/regulatory documents
+    const preserveStructure = url ? isLegalDocument(url, html) : false;
+    if (preserveStructure) {
+      // Convert tables to pipe-separated text before extraction
+      for (const table of root.querySelectorAll("table")) {
+        const rows = table.querySelectorAll("tr");
+        const textRows = rows.map(row => {
+          const cells = row.querySelectorAll("td, th");
+          return cells.map(c => c.text.trim()).filter(Boolean).join(" | ");
+        }).filter(r => r.length > 0);
+        if (textRows.length > 0) {
+          const tableText = textRows.join("\n");
+          table.set_content(tableText);
+        }
+      }
+      // Preserve ordered list numbering
+      for (const ol of root.querySelectorAll("ol")) {
+        const items = ol.querySelectorAll("li");
+        const numberedItems = items.map((li, i) => `${i + 1}. ${li.text.trim()}`);
+        ol.set_content(numberedItems.join("\n"));
+      }
     }
 
     // Stage 2: Try semantic content selectors

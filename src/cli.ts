@@ -16,6 +16,7 @@
 
 import { EnhancedSearch, DOMAIN_PRESETS } from "./search.js";
 import { SourceName } from "./core/types.js";
+import { startMcpServer } from "./mcp.js";
 
 interface CliArgs {
   query:         string;
@@ -58,6 +59,7 @@ Options:
   --no-early-return    Disable early-return and wait for all engines
   --stream             Show results as each engine responds
   --json               Output raw JSON (pipe-friendly)
+  --mcp                Launch MCP (Model Context Protocol) server over stdio
 
 Engines: duckduckgo, bing, mojeek, googlenews, bingnews, wikipedia,
          searxng, openalex, indiacode, sebi, brave*, tavily*, google*  (* = API key required)
@@ -189,7 +191,11 @@ async function main(): Promise<void> {
   console.log(`\n${"─".repeat(70)}`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (process.argv.includes("--mcp")) {
+  startMcpServer();
+} else {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

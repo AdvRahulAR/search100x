@@ -6,6 +6,12 @@ import { http } from "../core/http.js";
 /**
  * Yep — privacy-focused search engine by Ahrefs.
  */
+interface YepOrganicResult {
+  title?: string;
+  url?: string;
+  snippet?: string;
+}
+
 export class YepEngine implements Engine {
   readonly name = "yep" as const;
 
@@ -22,7 +28,8 @@ export class YepEngine implements Engine {
       },
     });
 
-    const items: any[] = res.data?.organic ?? [];
+    const data = res.data as Record<string, unknown> | undefined;
+    const items = (data?.organic as YepOrganicResult[]) ?? [];
     return items.map((r) => ({
       title:   r.title ?? "",
       url:     r.url ?? "",
