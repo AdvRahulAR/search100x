@@ -2,7 +2,7 @@
 
 **Multi-source web search for LLM grounding — works with any model provider.**
 
-Aggregates results from DuckDuckGo, Bing, Mojeek, Google News, Bing News, Wikipedia, Brave, Tavily, Google Search, Marginalia, and Yep into a single ranked list using RRF + BM25 scoring. Extracts relevant page passages and formats them for any LLM's context window.
+Aggregates results from DuckDuckGo, Bing, Mojeek, Google News, Bing News, Wikipedia, Brave, Tavily, Google Search, Marginalia, Yep, HackerNews, GitHub, ArXiv, IndianKanoon, IndiaCode, SEBI, and SearXNG into a single ranked list using RRF + BM25 scoring. Extracts relevant page passages and formats them for any LLM's context window.
 
 [![npm version](https://img.shields.io/npm/v/search100x)](https://www.npmjs.com/package/search100x)
 [![license](https://img.shields.io/npm/l/search100x)](./LICENSE)
@@ -26,18 +26,20 @@ Aggregates results from DuckDuckGo, Bing, Mojeek, Google News, Bing News, Wikipe
 
 ## Features
 
-- **12 search engines in parallel** — free engines (no key needed) + optional premium APIs
-- **SearXNG integration** — connect your own SearXNG instance to add ~70 sub-engines in a single call
-- **4-factor cascade scoring** — RRF × authority × BM25 × recency, with presets for `news`, `legal`, and `academic`
-- **Cross-engine + sub-engine consensus** — results confirmed by multiple engines (and SearXNG sub-engines) are boosted logarithmically
-- **Content extraction** — fetches actual page text, splits into 200-word windows, returns highest-scoring passages relevant to the query
-- **Cross-encoder re-ranking** — optional `rerank: true` uses ms-marco-MiniLM-L-6-v2 via ONNX for semantic reranking (no Python needed)
-- **Citations-ready output** — `toDocuments()` formats results as structured documents with source URLs (works with Anthropic, OpenAI, Gemini, Sarvam, any LLM)
-- **Domain presets** — `india-legal`, `us-legal`, `uk-legal`, `eu-legal`, `academic`, and more
+- **15+ search engines in parallel** — 100% zero-API-key free engines (DuckDuckGo, Bing, HackerNews, GitHub, ArXiv, Wikipedia, Mojeek, etc.) + optional premium APIs
+- **Ultra-Lightweight Micro-Server (<25MB RAM)** — native `node:http` standalone server with drop-in SearXNG API compatibility (`format=json`), embedded dark-mode Web UI, SSE streaming, and `/read` content extractor
+- **MCP Server Protocol (Model Context Protocol)** — built-in stdio MCP server (`search100x --mcp`) for Claude Desktop, Cursor, Cline, and AI agents
+- **Zero-Filesystem Sandbox Mode** — isomorphic in-memory runtime (`search100x/sandbox`) for browser workers, Cloudflare Workers, and Deno
+- **RAG Prompt Context Synthesizer** — `toPromptContext()` generates clean, token-budgeted markdown with numbered citations `[1]`, `[2]` for instant LLM prompt injection
+- **SearXNG Auto-Detection** — connects to `SEARXNG_URL` automatically to add ~70 sub-engines
+- **4-factor cascade scoring** — RRF × authority × BM25 × recency, with presets for `tech`, `news`, `legal`, and `academic`
+- **Cross-engine + sub-engine consensus** — results confirmed by multiple engines are boosted logarithmically
+- **Content extraction & Stealth** — fetches actual page text with automated browser profile rotation and token-bucket rate limiting
+- **Cross-encoder re-ranking** — optional `rerank: true` uses ONNX semantic reranking
+- **Domain presets** — `tech`, `india-legal`, `us-legal`, `uk-legal`, `eu-legal`, `academic`, and more
 - **Streaming** — `searchStream()` async generator yields results as each engine completes
 - **Plugin API** — register custom engines, disable built-ins, inspect circuit breaker state
-- **HTTP API + CLI** — ships with an Express server and a `search100x` CLI command
-- **Tiny install** — ~1.4 MB, one runtime dependency (`node-html-parser`)
+- **Tiny install** — lightweight dependencies (`node-html-parser`)
 
 ---
 
@@ -553,6 +555,7 @@ Named sets of authoritative domains for jurisdiction-scoped searches:
 ```typescript
 import { DOMAIN_PRESETS } from "search100x";
 
+DOMAIN_PRESETS["tech"]         // github.com, news.ycombinator.com, stackoverflow.com, dev.to, huggingface.co
 DOMAIN_PRESETS["india-legal"]  // indiacode.nic.in, sebi.gov.in, rbi.org.in, supremecourt.gov.in ...
 DOMAIN_PRESETS["us-legal"]     // law.cornell.edu, federalregister.gov, sec.gov, congress.gov ...
 DOMAIN_PRESETS["uk-legal"]     // legislation.gov.uk, gov.uk, ico.org.uk, fca.org.uk ...
@@ -624,13 +627,21 @@ const passage = await isomorphicRead("https://eur-lex.europa.eu/...", "fines");
 
 ---
 
-## CLI
+## CLI & Server Commands
 
 ```bash
+# Standard search with domain presets or specific sources
+npx search100x "transformer attention" --sources hackernews,arxiv,github --limit 5
+npx search100x "sqlite vector" --preset tech --limit 5
 npx search100x "Online Safety Act 2023" --preset uk-legal --limit 8
-npx search100x "SEC rule 10b-5" --preset us-legal --json
 npx search100x "EU AI Act" --scope eur-lex.europa.eu,ec.europa.eu --enrich 3
-npx search100x "deep learning" --preset academic --stream
+npx search100x "SEC rule 10b-5" --preset us-legal --json
+
+# Start the <25MB RAM standalone micro-server (SearXNG drop-in + Web UI)
+npx search100x serve --port 3000
+
+# Launch stdio MCP server for Claude Desktop / Cursor / AI IDEs
+npx search100x --mcp
 ```
 
 ---
@@ -676,6 +687,41 @@ npx search100x "deep learning" --preset academic --stream
 
 Formats `SearchResult[]` into the Anthropic Citations API document shape.
 Falls back to `result.snippet` when `result.content` is not populated.
+
+### `toPromptContext(results, options?)`
+
+Synthesizes search results into a clean, numbered markdown context block ready for instant injection into any LLM prompt (OpenAI, Gemini, Ollama, Anthropic, Sarvam, etc.).
+
+```typescript
+import { EnhancedSearch, toPromptContext } from "search100x";
+
+const s = new EnhancedSearch();
+const res = await s.search("sqlite vector search", { preset: "tech", limit: 5 });
+
+const promptContext = toPromptContext(res.results, {
+  maxTokens: 1500,     // strict token budget
+  includeSources: true,
+});
+
+const prompt = `Use the verified search results below to answer the user query:
+
+${promptContext}
+
+User Query: How do I run vector search in SQLite?`;
+```
+
+Produces structured citations:
+```markdown
+[1] "Show HN: SQLite-vector – Vector search extension for SQLite (no index, 30MB RAM)"
+URL: https://github.com/sqliteai/sqlite-vector
+Sources: hackernews
+Discussion on Hacker News: Show HN: SQLite-vector – Vector search extension for SQLite (no index, 30MB RAM)
+
+[2] "sqlite-vss: A SQLite extension for vector search"
+URL: https://github.com/asg017/sqlite-vss
+Sources: github
+[2.8k ★] A SQLite extension for efficient vector search based on Faiss
+```
 
 ### `buildCitedQuery(results, question, options?)`
 

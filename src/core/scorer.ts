@@ -189,6 +189,10 @@ export const ENGINE_WEIGHTS: Record<string, number> = {
   indiacode:    1.10,
   sebi:         1.10,
   indiankanoon: 1.20,
+  // Developer, open-source & academic preprints
+  hackernews:   0.80,
+  github:       0.75,
+  arxiv:        0.90,
   // Live-data adapters: always rank first when present — real data > indexed pages
   openmeteo:  1.00,
 };

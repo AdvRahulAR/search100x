@@ -73,6 +73,13 @@ export const DOMAIN_PRESETS: Record<string, string[]> = {
     "jstor.org",
     "semanticscholar.org",
   ],
+  "tech": [
+    "github.com",
+    "news.ycombinator.com",
+    "stackoverflow.com",
+    "dev.to",
+    "huggingface.co",
+  ],
 };
 
 export interface QueryBundle {

@@ -136,3 +136,74 @@ export function buildCitedQuery(
     }],
   };
 }
+
+export interface PromptContextOptions {
+  /** Maximum number of results to include (default: 8) */
+  limit?: number;
+  /** Maximum estimated tokens (1 token ≈ 4 characters, default: 3000 tokens ≈ 12000 chars) */
+  maxTokens?: number;
+  /** Explicit maximum character limit (overrides maxTokens) */
+  maxChars?: number;
+  /** Minimum relevance score to include (default: 0.10) */
+  minScore?: number;
+  /** Include sources attribution tag (default: true) */
+  includeSources?: boolean;
+}
+
+/**
+ * toPromptContext() — converts search results into a clean, token-budgeted,
+ * numeric citation context string ready for injection into any LLM prompt
+ * (Claude, OpenAI, Gemini, Ollama, LlamaIndex, LangChain).
+ *
+ * Example Output:
+ * [1] "Quantum Computing Overview"
+ * URL: https://en.wikipedia.org/wiki/Quantum_computing
+ * Sources: wikipedia, bing
+ * Quantum computing is a rapidly-emerging technology...
+ *
+ * [2] "Quantum Supremacy"
+ * URL: https://nature.com/...
+ * ...
+ */
+export function toPromptContext(
+  results: SearchResult[],
+  options: PromptContextOptions = {}
+): string {
+  const {
+    limit = 8,
+    maxTokens = 3000,
+    maxChars = options.maxChars ?? maxTokens * 4,
+    minScore = 0.10,
+    includeSources = true,
+  } = options;
+
+  let currentChars = 0;
+  const blocks: string[] = [];
+
+  for (let i = 0; i < results.length && blocks.length < limit; i++) {
+    const r = results[i];
+    if (r.score < minScore) continue;
+
+    const content = (r.content ?? r.snippet ?? "").trim();
+    if (!content) continue;
+
+    const citationIndex = blocks.length + 1;
+    const sourcesTag = includeSources && r.sources?.length ? `Sources: ${r.sources.join(", ")}\n` : "";
+    const blockHeader = `[${citationIndex}] "${r.title}"\nURL: ${r.url}\n${sourcesTag}`;
+
+    // Check remaining budget
+    const remainingBudget = maxChars - currentChars - blockHeader.length;
+    if (remainingBudget <= 50) break; // Not enough budget for meaningful text
+
+    const budgetedContent = content.length > remainingBudget
+      ? content.slice(0, remainingBudget - 3) + "..."
+      : content;
+
+    const fullBlock = `${blockHeader}${budgetedContent}`;
+    blocks.push(fullBlock);
+    currentChars += fullBlock.length + 2;
+  }
+
+  return blocks.join("\n\n");
+}
+

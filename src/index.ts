@@ -23,8 +23,8 @@ export type { SearXNGConfig } from "./core/types.js";
 export { rerankResults } from "./core/reranker.js";
 export { ENGINE_TIMEOUTS } from "./core/engine.js";
 export { fetchPageContent, fetchBestPassage, enrichSnippets, fetchRelevantContent, enrichContents, enrichContentsLegal } from "./core/fetcher.js";
-export { toDocuments, buildCitedQuery } from "./core/documents.js";
-export type { CitationDocument, ToDocumentsOptions } from "./core/documents.js";
+export { toDocuments, buildCitedQuery, toPromptContext } from "./core/documents.js";
+export type { CitationDocument, ToDocumentsOptions, PromptContextOptions } from "./core/documents.js";
 export { CircuitBreakerRegistry } from "./core/circuit.js";
 export type { QueryBundle } from "./core/transformer.js";
 export { MarginaliaEngine } from "./adapters/marginalia.js";
@@ -109,5 +109,10 @@ export { createMicroServer, startMicroServer } from "./micro-server.js";
 export type { MicroServerOptions, MicroServerInstance } from "./micro-server.js";
 export { createSandboxSearch, isomorphicSearch, isomorphicRead } from "./sandbox.js";
 export type { SandboxSearchOptions } from "./sandbox.js";
+
+// v4.2.0 exports — developer & research zero-key engines
+export { HackerNewsEngine } from "./adapters/hackernews.js";
+export { GitHubEngine }     from "./adapters/github.js";
+export { ArXivEngine }      from "./adapters/arxiv.js";
 
 

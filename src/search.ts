@@ -33,6 +33,9 @@ import { IndiaCodeEngine, SebiEngine } from "./adapters/indiacode.js";
 import { IndianKanoonEngine } from "./adapters/indiankanoon.js";
 import { StartpageEngine } from "./adapters/startpage.js";
 import { DuckDuckGoLiteEngine } from "./adapters/enhanced-engines.js";
+import { HackerNewsEngine } from "./adapters/hackernews.js";
+import { GitHubEngine } from "./adapters/github.js";
+import { ArXivEngine } from "./adapters/arxiv.js";
 
 export { DOMAIN_PRESETS }         from "./core/transformer.js";
 export { ResultCache, FileResultCache } from "./core/cache.js";
@@ -411,6 +414,9 @@ export class EnhancedSearch {
     m.set("sebi",       new SebiEngine());
     m.set("indiankanoon", new IndianKanoonEngine());
     m.set("startpage",  new StartpageEngine());
+    m.set("hackernews", new HackerNewsEngine());
+    m.set("github",     new GitHubEngine());
+    m.set("arxiv",      new ArXivEngine());
 
     if (tavilyApiKey)              m.set("tavily",    new TavilyEngine(tavilyApiKey));
     if (braveApiKey)               m.set("brave",     new BraveEngine(braveApiKey));
@@ -423,9 +429,15 @@ export class EnhancedSearch {
 
   private buildEntries(requested?: SourceName[], scopedDomains?: string[], preset?: string): EngineEntry[] {
     const isLegalPreset = preset === "legal" || (scopedDomains && scopedDomains.some(d => d.includes(".nic.in") || d.includes("kanoon") || d.includes("livelaw")));
+    const isAcademic = preset === "academic";
+    const isTech = preset === "tech";
     const DEFAULT_EXCLUDED: SourceName[] = isLegalPreset
-      ? ["openalex"]
-      : ["openalex", "indiacode", "sebi"];
+      ? ["openalex", "arxiv", "github"]
+      : isAcademic
+      ? ["indiacode", "sebi", "github"]
+      : isTech
+      ? ["openalex", "indiacode", "sebi", "arxiv"]
+      : ["openalex", "arxiv", "indiacode", "sebi"];
     const VARIANT: Record<SourceName, QueryVariant> = {
       duckduckgo:   "primary",
       startpage:    "primary",
@@ -445,6 +457,9 @@ export class EnhancedSearch {
       indiacode:    "primary",
       sebi:         "primary",
       indiankanoon: "primary",
+      hackernews:   "primary",
+      github:       "primary",
+      arxiv:        "primary",
     };
 
     const base: EngineEntry[] = requested

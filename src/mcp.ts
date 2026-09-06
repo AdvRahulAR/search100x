@@ -14,7 +14,7 @@ import { fetchPageContent, fetchRelevantContent } from "./core/fetcher.js";
 // ── MCP Server Constants ─────────────────────────────────────────────────────
 
 export const MCP_SERVER_NAME = "search100x";
-export const MCP_SERVER_VERSION = "4.1.0";
+export const MCP_SERVER_VERSION = "4.2.0";
 export const MCP_PROTOCOL_VERSION = "2024-11-05";
 
 export const MCP_DEFAULT_SEARCH_LIMIT = 10;

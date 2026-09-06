@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.0] - 2026-09-06
+
+### Added
+- **Developer & Research Zero-Key Engines**:
+  - **HackerNews Engine** (`src/adapters/hackernews.ts`): Queries Algolia's public HN API with zero keys, retrieving top developer discussions, community points, and comment counts.
+  - **GitHub Search Engine** (`src/adapters/github.ts`): Queries GitHub's public API for repositories, star counts, descriptions, and primary programming languages.
+  - **ArXiv Preprints Engine** (`src/adapters/arxiv.ts`): Queries ArXiv's public Atom XML API with zero keys, extracting scientific preprints, abstracts, authors, and canonical paper links.
+- **RAG Prompt Context Budgeter (`toPromptContext`)** (`src/core/documents.ts`):
+  - Transforms search results into clean numeric citations (`[1]`, `[2]`, `[3]`) with strict token and character budgeting ready to inject into any LLM prompt (Claude, OpenAI, Gemini, Ollama, LangChain).
+- **New `"tech"` Domain Preset**:
+  - Automatically scopes queries to `github.com`, `news.ycombinator.com`, `stackoverflow.com`, `dev.to`, and `huggingface.co`.
+
+---
+
 ## [4.1.0] - 2026-09-06
 
 ### Added

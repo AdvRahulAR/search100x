@@ -16,7 +16,7 @@ import {
 describe("MCP Server JSON-RPC 2.0 Protocol", () => {
   it("exports all tools and metadata", () => {
     assert.equal(MCP_SERVER_NAME, "search100x");
-    assert.equal(MCP_SERVER_VERSION, "4.1.0");
+    assert.equal(MCP_SERVER_VERSION, "4.2.0");
     assert.equal(MCP_PROTOCOL_VERSION, "2024-11-05");
     assert.equal(MCP_TOOLS.length, 5);
 
@@ -51,7 +51,7 @@ describe("MCP Server JSON-RPC 2.0 Protocol", () => {
     assert.equal(messages[0].id, 1);
     assert.equal(messages[0].result.protocolVersion, "2024-11-05");
     assert.equal(messages[0].result.serverInfo.name, "search100x");
-    assert.equal(messages[0].result.serverInfo.version, "4.1.0");
+    assert.equal(messages[0].result.serverInfo.version, "4.2.0");
     assert.ok(messages[0].result.capabilities.tools);
   });
 

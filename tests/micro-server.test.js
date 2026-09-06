@@ -30,7 +30,7 @@ describe("search100x Micro-Server & Sandbox Runtime", () => {
     const data = await res.json();
     assert.equal(data.status, "ok");
     assert.equal(data.engine, "search100x-micro");
-    assert.equal(data.version, "4.1.0");
+    assert.equal(data.version, "4.2.0");
     assert.ok(typeof data.uptimeSeconds === "number");
     assert.ok(data.memory.heapUsedMb > 0);
     assert.ok(data.memory.heapUsedMb < 50, "Heap used should be well under micro footprint");

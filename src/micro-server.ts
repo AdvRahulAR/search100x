@@ -259,7 +259,7 @@ export function createMicroServer(options: MicroServerOptions = {}): {
       sendJson(res, 200, {
         status: "ok",
         engine: "search100x-micro",
-        version: "4.1.0",
+        version: "4.2.0",
         uptimeSeconds: Math.round(process.uptime()),
         memory: {
           rssMb: +(mem.rss / (1024 * 1024)).toFixed(2),
@@ -341,7 +341,7 @@ export function createMicroServer(options: MicroServerOptions = {}): {
         // Return API help info
         sendJson(res, 200, {
           engine: "search100x-micro",
-          version: "4.1.0",
+          version: "4.2.0",
           endpoints: {
             "GET /search?q={query}": "Search multi-source consensus index",
             "GET /search?q={query}&format=json": "Drop-in SearXNG compatible search response",
@@ -466,7 +466,7 @@ export async function startMicroServer(options: MicroServerOptions = {}): Promis
         const heapMb = (mem.heapUsed / (1024 * 1024)).toFixed(1);
 
         console.log(`\n┌─────────────────────────────────────────────────────────────┐`);
-        console.log(`│ search100x Micro-Server (v4.1.0)                             │`);
+        console.log(`│ search100x Micro-Server (v4.2.0)                             │`);
         console.log(`│ Free Metasearch & SearXNG Drop-in Engine                    │`);
         console.log(`├─────────────────────────────────────────────────────────────┤`);
         console.log(`│ Web UI:       http://${host === "0.0.0.0" ? "localhost" : host}:${port}/                     │`);
