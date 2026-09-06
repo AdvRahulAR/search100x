@@ -7,10 +7,12 @@
  * richer content than the standard search API.
  */
 
+import { parse } from "node-html-parser";
 import { Engine } from "../core/engine.js";
 import { RawResult } from "../core/types.js";
 import { http, HttpError } from "../core/http.js";
 import { stripHtml, truncate } from "../core/normalizer.js";
+import { getStealthHeaders } from "../core/stealth.js";
 
 async function fetchWithRetry(url: string, timeoutMs: number, attempt = 0): Promise<RawResult[]> {
   try {
@@ -81,21 +83,36 @@ export class WikipediaFullTextEngine implements Engine {
  *
  * Phase 3: Fallback Engines
  */
+function cleanDdgLiteUrl(rawUrl: string): string {
+  if (!rawUrl) return "";
+  if (rawUrl.includes("uddg=")) {
+    try {
+      const parsed = new URL(rawUrl, "https://duckduckgo.com");
+      const target = parsed.searchParams.get("uddg");
+      if (target) return decodeURIComponent(target);
+    } catch {
+      // ignore
+    }
+  }
+  return rawUrl.startsWith("//") ? `https:${rawUrl}` : rawUrl;
+}
+
 export class DuckDuckGoLiteEngine implements Engine {
   readonly name = "duckduckgo" as const;
 
   async search(query: string, timeoutMs: number): Promise<RawResult[]> {
     try {
       const url = new URL("https://lite.duckduckgo.com/lite/");
-      const res = await http.post(url.toString(), {
-        q: query,
-        kl: "",
-      }, {
+      const form = new URLSearchParams();
+      form.set("q", query);
+      form.set("kl", "");
+
+      const res = await http.post(url.toString(), form.toString(), {
         timeout: timeoutMs,
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+          ...getStealthHeaders(),
           "Content-Type": "application/x-www-form-urlencoded",
-          "Accept": "text/html",
+          "Accept": "text/html,application/xhtml+xml",
         },
         responseType: "text",
       });
@@ -108,16 +125,23 @@ export class DuckDuckGoLiteEngine implements Engine {
   }
 
   private parseLiteHtml(html: string): RawResult[] {
+    const root = parse(html);
     const results: RawResult[] = [];
-    // DDG Lite has simple HTML tables with results
-    const rowPattern = /<a[^>]+class="result-link"[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>/gi;
-    let match;
-    while ((match = rowPattern.exec(html)) !== null && results.length < 10) {
-      const url = match[1];
-      const title = match[2].trim().replace(/&/g, "&");
-      const snippet = match[3].replace(/<[^>]+>/g, "").trim();
-      if (url && title && !url.includes("duckduckgo.com")) {
-        results.push({ title, url, snippet });
+    for (const link of root.querySelectorAll("a.result-link")) {
+      if (results.length >= 10) break;
+      const rawUrl = link.getAttribute("href") ?? "";
+      const title = link.text.trim();
+      const tr = link.closest("tr");
+      const snippetTr = tr?.nextElementSibling;
+      const snippet = snippetTr?.querySelector(".result-snippet")?.text.trim() ?? "";
+      const url = cleanDdgLiteUrl(rawUrl);
+
+      if (url && title && !url.includes("duckduckgo.com") && url.startsWith("http")) {
+        results.push({
+          title,
+          url,
+          snippet: truncate(stripHtml(snippet)),
+        });
       }
     }
     return results;

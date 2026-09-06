@@ -4,6 +4,7 @@ import { RawResult, Logger } from "../core/types.js";
 import { stripHtml, truncate } from "../core/normalizer.js";
 import { http } from "../core/http.js";
 import { getPinnedProfile, getStealthHeaders } from "../core/stealth.js";
+import { DuckDuckGoLiteEngine } from "./enhanced-engines.js";
 
 /**
  * DuckDuckGo Web — HTML no-JS endpoint, no API key required.
@@ -33,6 +34,20 @@ const VQD_MAX    = 200;             // max queries to cache per instance
 const TIME_RANGE: Record<string, string> = {
   day: "d", week: "w", month: "m", year: "y",
 };
+
+function cleanDdgUrl(rawUrl: string): string {
+  if (!rawUrl) return "";
+  if (rawUrl.includes("uddg=")) {
+    try {
+      const parsed = new URL(rawUrl, "https://duckduckgo.com");
+      const target = parsed.searchParams.get("uddg");
+      if (target) return decodeURIComponent(target);
+    } catch {
+      // ignore
+    }
+  }
+  return rawUrl.startsWith("//") ? `https:${rawUrl}` : rawUrl;
+}
 
 function getDdgHeaders(query: string): Record<string, string> {
   const profile = getPinnedProfile(`ddg:${query}`);
@@ -149,7 +164,8 @@ export class DuckDuckGoEngine implements Engine {
       for (const el of retryRoot.querySelectorAll("#links .web-result")) {
         const link    = el.querySelector("h2 a");
         const title   = link?.text.trim() ?? "";
-        const url     = link?.getAttribute("href") ?? "";
+        const rawUrl  = link?.getAttribute("href") ?? "";
+        const url     = cleanDdgUrl(rawUrl);
         const snippet = truncate(stripHtml(el.querySelector("a.result__snippet")?.text ?? ""));
         if (!title || !url || !url.startsWith("http")) continue;
         results2.push({ title, url, snippet });
@@ -169,7 +185,8 @@ export class DuckDuckGoEngine implements Engine {
     for (const el of root.querySelectorAll("#links .web-result")) {
       const link    = el.querySelector("h2 a");
       const title   = link?.text.trim() ?? "";
-      const url     = link?.getAttribute("href") ?? "";
+      const rawUrl  = link?.getAttribute("href") ?? "";
+      const url     = cleanDdgUrl(rawUrl);
       const snippet = truncate(stripHtml(el.querySelector("a.result__snippet")?.text ?? ""));
 
       if (!title || !url || !url.startsWith("http")) continue;
@@ -177,7 +194,9 @@ export class DuckDuckGoEngine implements Engine {
     }
 
     if (results.length === 0) {
-      this.logger?.warn(`[duckduckgo] 0 results parsed from response (possible rate-limiting or layout change)`);
+      this.logger?.warn(`[duckduckgo] 0 results from HTML endpoint — auto-falling back to DDG Lite`);
+      const lite = new DuckDuckGoLiteEngine();
+      return lite.search(query, timeoutMs);
     }
 
     return results;

@@ -48,10 +48,10 @@ export class SearXNGEngine implements Engine {
   readonly name = "searxng" as const;
 
   constructor(private cfg: SearXNGConfig = {}) {
-    // Fall back to hardcoded defaults if not explicitly provided
-    this.cfg.baseUrl = this.cfg.baseUrl ?? DEFAULT_SEARXNG_BASE_URL;
-    this.cfg.token  = this.cfg.token  ?? DEFAULT_SEARXNG_TOKEN;
-    this.cfg.engines = this.cfg.engines ?? DEFAULT_SEARXNG_ENGINES;
+    // Fall back to env vars or hardcoded defaults if not explicitly provided
+    this.cfg.baseUrl = this.cfg.baseUrl ?? process.env.SEARXNG_URL ?? DEFAULT_SEARXNG_BASE_URL;
+    this.cfg.token  = this.cfg.token  ?? process.env.SEARXNG_TOKEN ?? DEFAULT_SEARXNG_TOKEN;
+    this.cfg.engines = this.cfg.engines ?? process.env.SEARXNG_ENGINES ?? DEFAULT_SEARXNG_ENGINES;
   }
 
   async search(query: string, timeoutMs = 7_000, timeRange?: string): Promise<RawResult[]> {
