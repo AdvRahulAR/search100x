@@ -32,6 +32,7 @@ Aggregates results from DuckDuckGo, Bing, Mojeek, Google News, Bing News, Wikipe
 - **Zero-Filesystem Sandbox Mode** — isomorphic in-memory runtime (`search100x/sandbox`) for browser workers, Cloudflare Workers, and Deno
 - **RAG Prompt Context Synthesizer** — `toPromptContext()` generates clean, token-budgeted markdown with numbered citations `[1]`, `[2]` for instant LLM prompt injection
 - **SearXNG Auto-Detection** — connects to `SEARXNG_URL` automatically to add ~70 sub-engines
+- **Silent Browser Automation (Zero-Bloat CDP)** — 0MB Chromium download; uses native WebSocket over Chrome DevTools Protocol to bypass Cloudflare/WAF, 403 Forbidden blocks, and JS-heavy pages with explicit user permission
 - **4-factor cascade scoring** — RRF × authority × BM25 × recency, with presets for `tech`, `news`, `legal`, and `academic`
 - **Cross-engine + sub-engine consensus** — results confirmed by multiple engines are boosted logarithmically
 - **Content extraction & Stealth** — fetches actual page text with automated browser profile rotation and token-bucket rate limiting
@@ -659,6 +660,49 @@ const passage = await isomorphicRead("https://eur-lex.europa.eu/...", "fines");
 
 ---
 
+## Silent Browser Automation via Chrome DevTools Protocol (CDP)
+
+`search100x` includes a zero-dependency, zero-download silent browser automation engine. Instead of bundling a 300MB Chromium download like Puppeteer or Playwright, `search100x` directly communicates with your system's existing Google Chrome, Chromium, or Microsoft Edge browser over standard Chrome DevTools Protocol (CDP) using Node's native global `WebSocket` and `node:http`.
+
+### Key Benefits
+- **JavaScript-Heavy SPAs**: Extracts rendered content from client-rendered React, Vue, Angular, and Next.js sites that return empty shells to standard `fetch`.
+- **WAF & Cloudflare Challenges**: Seamlessly bypasses Turnstile, bot challenges, and HTTP 403 Forbidden blocks.
+- **Adaptive 2-Tier Fallback**: Always uses ultrafast `fetch` first, automatically cascading to silent headless browser automation only when challenged.
+- **Bot Evasion**: Strips `navigator.webdriver` via `--disable-blink-features=AutomationControlled` and Page script evaluation.
+
+### Strict User Permission Model
+Browser automation **never** runs without explicit user authorization:
+- In Node/TS code: require `browser: { enabled: true }`
+- In CLI: pass the `--browser` flag
+- In Micro-Server: pass `?browser=true`
+- In MCP Server: pass `"browser": true`
+
+### Programmatic Usage
+
+```typescript
+import { fetchWithBrowser, EnhancedSearch } from "search100x";
+
+// 1. Direct headless page extraction
+const page = await fetchWithBrowser("https://example.com", {
+  enabled: true,           // Explicit consent required
+  headless: true,          // Runs invisibly in background
+  timeoutMs: 15000,
+  waitForNetworkIdle: true,
+});
+console.log(page.title, page.text);
+
+// 2. Multi-engine search with silent browser enrichment fallback
+const s = new EnhancedSearch({
+  browser: { enabled: true },
+});
+
+const res = await s.search("Next.js App Router client actions", {
+  enrichContent: 3,        // Headless browser fallback if HTTP 403 occurs
+});
+```
+
+---
+
 ## CLI & Server Commands
 
 ```bash
@@ -668,6 +712,13 @@ npx search100x "sqlite vector" --preset tech --limit 5
 npx search100x "Online Safety Act 2023" --preset uk-legal --limit 8
 npx search100x "EU AI Act" --scope eur-lex.europa.eu,ec.europa.eu --enrich 3
 npx search100x "SEC rule 10b-5" --preset us-legal --json
+
+# Search with silent browser automation fallback for protected pages
+npx search100x "Cloudflare protected report" --enrich 3 --browser
+
+# Connect to existing Chrome instance running with remote debugging
+# (chrome.exe --remote-debugging-port=9222)
+npx search100x "Protected document" --enrich 1 --cdp http://127.0.0.1:9222
 
 # Start the <25MB RAM standalone micro-server (SearXNG drop-in + Web UI)
 npx search100x serve --port 3000

@@ -25,6 +25,7 @@ import { bm25Scores, legalCitations } from "./bm25.js";
 import { extractContent } from "./extractor.js";
 import { SearchResult, ResultType } from "./types.js";
 import { getStealthHeaders, getRandomProfile } from "./stealth.js";
+import { fetchWithBrowser, BrowserOptions } from "./browser.js";
 
 const NOISE_SELECTORS = [
   "script", "style", "noscript",
@@ -132,36 +133,64 @@ async function resolveGoogleNewsUrl(googleNewsUrl: string, timeoutMs: number): P
 
 // ── HTML fetch + clean ────────────────────────────────────────────────────────
 
-async function fetchCleanText(url: string, timeoutMs: number): Promise<string | undefined> {
+async function fetchCleanText(
+  url: string,
+  timeoutMs: number,
+  browser?: BrowserOptions
+): Promise<string | undefined> {
   try {
     // Resolve Google News redirect URLs to real publisher URLs
     if (GOOGLE_NEWS_PATTERN.test(url)) {
       const realUrl = await resolveGoogleNewsUrl(url, timeoutMs);
       if (!realUrl) return undefined;
       if (!GOOGLE_NEWS_PATTERN.test(realUrl)) {
-        return await fetchCleanText(realUrl, timeoutMs);
+        return await fetchCleanText(realUrl, timeoutMs, browser);
       }
       return undefined;
     }
 
-    const res = await http.get(url, {
-      timeout: timeoutMs,
-      headers: getStealthHeaders(),
-      responseType: "text",
-    });
+    let html: string | undefined;
 
-    if (typeof res.data !== "string") return undefined;
+    try {
+      const res = await http.get(url, {
+        timeout: timeoutMs,
+        headers: getStealthHeaders(),
+        responseType: "text",
+      });
 
-    // Content length guard — prevent OOM on malicious/huge pages
-    const html = res.data.length > MAX_CONTENT_LENGTH
-      ? res.data.slice(0, MAX_CONTENT_LENGTH)
-      : res.data;
+      if (typeof res.data === "string") {
+        html = res.data.length > MAX_CONTENT_LENGTH
+          ? res.data.slice(0, MAX_CONTENT_LENGTH)
+          : res.data;
+      }
+    } catch {
+      // If HTTP fails (403, 429, WAF blocks) and browser is permitted, fall back to browser
+      if (browser?.enabled) {
+        try {
+          const bRes = await fetchWithBrowser(url, browser);
+          return bRes.text || undefined;
+        } catch {
+          return undefined;
+        }
+      }
+      return undefined;
+    }
 
     // WAF / bot challenge guard — don't return challenge pages as content
-    if (isBotChallenge(html)) return undefined;
+    if (!html || isBotChallenge(html)) {
+      if (browser?.enabled) {
+        try {
+          const bRes = await fetchWithBrowser(url, browser);
+          return bRes.text || undefined;
+        } catch {
+          return undefined;
+        }
+      }
+      return undefined;
+    }
 
     // Use Trafilatura-style cascade extractor
-    const extracted = extractContent(html);
+    const extracted = extractContent(html, url);
     if (extracted && extracted.length >= 50) return extracted;
 
     const root = parse(html);
@@ -232,9 +261,10 @@ export async function fetchBestPassage(
   url: string,
   query: string,
   timeoutMs = 5_000,
-  maxChars = 600
+  maxChars = 600,
+  browser?: BrowserOptions
 ): Promise<string | undefined> {
-  const text = await fetchCleanText(url, timeoutMs);
+  const text = await fetchCleanText(url, timeoutMs, browser);
   if (!text || text.length < 50) return undefined;
   const windows = passages(text);
   if (windows.length === 1) return truncateToWord(text, maxChars);
@@ -248,9 +278,10 @@ export async function fetchBestPassage(
 export async function fetchPageContent(
   url: string,
   timeoutMs = 5_000,
-  maxChars = 600
+  maxChars = 600,
+  browser?: BrowserOptions
 ): Promise<string | undefined> {
-  const text = await fetchCleanText(url, timeoutMs);
+  const text = await fetchCleanText(url, timeoutMs, browser);
   if (!text || text.length < 50) return undefined;
   return truncateToWord(text, maxChars);
 }
@@ -265,7 +296,8 @@ export async function enrichSnippets<T extends { url: string; snippet: string }>
   results: T[],
   topN = 3,
   timeoutMs = 5_000,
-  query = ""
+  query = "",
+  browser?: BrowserOptions
 ): Promise<T[]> {
   const targets = results.slice(0, topN);
   const deadline = Date.now() + timeoutMs;
@@ -274,8 +306,8 @@ export async function enrichSnippets<T extends { url: string; snippet: string }>
       if (!isFetchable(r.url)) return Promise.resolve(undefined);
       const remaining = Math.max(500, deadline - Date.now());
       return query
-        ? fetchBestPassage(r.url, query, remaining)
-        : fetchPageContent(r.url, remaining);
+        ? fetchBestPassage(r.url, query, remaining, 600, browser)
+        : fetchPageContent(r.url, remaining, 600, browser);
     })
   );
   fetched.forEach((content, i) => {
@@ -297,6 +329,7 @@ export async function fetchRelevantContent(
     maxChars?: number;
     timeoutMs?: number;
     legalMode?: boolean;
+    browser?: BrowserOptions;
   } = {}
 ): Promise<string | undefined> {
   const {
@@ -305,6 +338,7 @@ export async function fetchRelevantContent(
     maxChars = 3_000,
     timeoutMs = 6_000,
     legalMode = false,
+    browser,
   } = options;
 
   const WINDOW = legalMode ? 500 : 200;
@@ -313,7 +347,7 @@ export async function fetchRelevantContent(
   const finalMaxPassages = legalMode ? Math.max(maxPassages, 8) : maxPassages;
   const finalMaxChars = legalMode ? Math.max(maxChars, 12_000) : maxChars;
 
-  const text = await fetchCleanText(url, timeoutMs);
+  const text = await fetchCleanText(url, timeoutMs, browser);
   if (!text || text.length < 50) return undefined;
 
   let wins = passages(text, WINDOW, WINDOW - STEP);

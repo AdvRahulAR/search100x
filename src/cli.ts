@@ -33,6 +33,8 @@ interface CliArgs {
   deep?:         boolean;
   noEarlyReturn?: boolean;
   scoringPreset?: "default" | "news" | "legal" | "academic" | "tech" | "business";
+  browser?: boolean;
+  cdpUrl?: string;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -62,6 +64,8 @@ Options:
                        --scope legislation.gov.uk,ico.org.uk
   --region <CC>        News region ISO 3166-1 code (default: US)
   --enrich <n>         Fetch full page content for top-N results (default: 0)
+  --browser            Enable silent browser automation fallback for JavaScript/bot-protected pages
+  --cdp <url>          Connect to existing Chrome DevTools Protocol URL (e.g. http://127.0.0.1:9222)
   --min-engines <n>    Minimum successful engines needed for early-return (default: 3)
   --max-wait <ms>      Maximum wait time in ms before early-return (default: 4000)
   --deep               Deep search mode (queries all engines, waits for thorough results)
@@ -97,6 +101,8 @@ Examples:
   let deep: boolean | undefined;
   let noEarlyReturn: boolean | undefined;
   let presetName: "default" | "news" | "legal" | "academic" | "tech" | "business" | undefined;
+  let browser       = false;
+  let cdpUrl: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -106,6 +112,8 @@ Examples:
     if (a === "--region")          { region = args[++i].toUpperCase(); continue; }
     if (a === "--json")            { jsonOutput = true; continue; }
     if (a === "--enrich")          { enrichTopN = Number(args[++i]); continue; }
+    if (a === "--browser")         { browser = true; continue; }
+    if (a === "--cdp")             { cdpUrl = args[++i]; browser = true; continue; }
     if (a === "--stream")          { stream = true; continue; }
     if (a === "--min-engines")     { minEngines = Number(args[++i]); continue; }
     if (a === "--max-wait")        { maxWaitMs = Number(args[++i]); continue; }
@@ -143,7 +151,7 @@ Examples:
     process.exit(1);
   }
 
-  return { query, limit, sources, scope, jsonOutput, enrichTopN, stream, region, minEngines, maxWaitMs, deep, noEarlyReturn, scoringPreset: presetName };
+  return { query, limit, sources, scope, jsonOutput, enrichTopN, stream, region, minEngines, maxWaitMs, deep, noEarlyReturn, scoringPreset: presetName, browser, cdpUrl };
 }
 
 function printResult(
@@ -161,7 +169,7 @@ function printResult(
 }
 
 async function main(): Promise<void> {
-  const { query, limit, sources, scope, jsonOutput, enrichTopN, stream, region, minEngines, maxWaitMs, deep, noEarlyReturn, scoringPreset } = parseArgs(process.argv);
+  const { query, limit, sources, scope, jsonOutput, enrichTopN, stream, region, minEngines, maxWaitMs, deep, noEarlyReturn, scoringPreset, browser, cdpUrl } = parseArgs(process.argv);
 
   const s = new EnhancedSearch({
     braveApiKey:  process.env.BRAVE_API_KEY,
@@ -173,7 +181,18 @@ async function main(): Promise<void> {
     logger:       process.env.DEBUG ? undefined : { warn: () => {}, log: () => {}, debug: () => {} },
   });
 
-  const opts = { limit, sources, scopedDomains: scope, enrichTopN, minEngines, maxWaitMs, deep, noEarlyReturn, scoringPreset };
+  const opts = {
+    limit,
+    sources,
+    scopedDomains: scope,
+    enrichTopN,
+    minEngines,
+    maxWaitMs,
+    deep,
+    noEarlyReturn,
+    scoringPreset,
+    browser: browser ? { enabled: true, cdpUrl } : undefined,
+  };
 
   if (stream && !jsonOutput) {
     console.log(`\nSearching: "${query}" (streaming)\n${"─".repeat(70)}`);

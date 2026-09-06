@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.0] - 2026-09-06
+
+### Added
+- **Silent Browser Automation via Chrome DevTools Protocol (CDP)** (`src/core/browser.ts`):
+  - Zero-bloat, zero-dependency browser control client communicating directly via native Node.js global `WebSocket` and `node:http`.
+  - Auto-discovers local Google Chrome, Chromium, or Microsoft Edge binaries across Windows, macOS, and Linux without downloading 300MB Chromium binaries.
+  - Connects to existing running browsers (`--remote-debugging-port`) or spawns isolated headless browser sessions on dynamic unprivileged ports with disposable user-data directories.
+  - Evades bot detection by stripping `navigator.webdriver` via `--disable-blink-features=AutomationControlled` and Page.addScriptToEvaluateOnNewDocument.
+  - Evaluates rendered DOM and extracts clean page text after network idle / DOM readiness.
+- **Strict Explicit Permission Model**:
+  - Requires explicit user consent (`options.enabled = true`, `--browser` CLI flag, or `browser: true` in MCP/Micro-Server).
+  - Throws descriptive error if invoked without user authorization.
+- **Adaptive 2-Tier Fallback Content Extraction**:
+  - `fetchCleanText()` uses ultrafast native `fetch` by default, automatically cascading to silent headless browser automation only when challenged by Cloudflare/WAF, HTTP 403 Forbidden, or HTTP 429 Too Many Requests.
+  - Supports `enrichSnippets()`, `fetchRelevantContent()`, and `fetchPageContent()`.
+- **CLI Support**: Added `--browser` flag and `--cdp <url>` option to `search100x`.
+- **MCP Server Protocol**: Added `browser?: boolean` parameter to `fetch_page_content`, `search_and_read`, `web_search`, and `legal_search` tools.
+- **Micro-Server API**: Added `?browser=true` query parameter to `/read` and `/search` endpoints.
+- **Subpath Package Export**: Exported `./browser` for direct programmatic browser automation (`import { fetchWithBrowser } from "search100x/browser"`).
+
+---
+
 ## [4.2.0] - 2026-09-06
 
 ### Added

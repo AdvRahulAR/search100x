@@ -1,6 +1,6 @@
 {
   "name": "search100x",
-  "version": "4.2.0",
+  "version": "4.3.0",
   "description": "Multi-source web search for LLM grounding — works with any model provider",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,6 +12,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./browser": {
+      "import": "./dist/core/browser.js",
+      "types": "./dist/core/browser.d.ts"
     },
     "./sandbox": {
       "import": "./dist/sandbox.js",

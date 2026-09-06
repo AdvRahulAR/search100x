@@ -308,8 +308,10 @@ export class EnhancedSearch {
       results = [pinnedResult, ...results.filter(r => r.url !== pinnedResult!.url)];
     }
 
+    const browserConfig = options.browser ?? this.config.browser;
+
     if (enrichTopN > 0 && results.length > 0) {
-      results = await enrichSnippets(results, enrichTopN, Math.min(totalTimeout, 5_000), query);
+      results = await enrichSnippets(results, enrichTopN, Math.min(totalTimeout, 5_000), query, browserConfig);
     }
 
     if (enrichContent > 0 && results.length > 0) {
@@ -317,7 +319,7 @@ export class EnhancedSearch {
       // 12000-char cap, jurisdiction-aware BM25 boost, citation-aware scoring
       const isLegal = preset === "legal";
       const enrichTimeout = Math.min(totalTimeout, isLegal ? 8_000 : 8_000);
-      results = await enrichContents(results, enrichContent, enrichTimeout, query, { legalMode: isLegal });
+      results = await enrichContents(results, enrichContent, enrichTimeout, query, { legalMode: isLegal, browser: browserConfig });
     }
 
     if (rerank && results.length > 0) {

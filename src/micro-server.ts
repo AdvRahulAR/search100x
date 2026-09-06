@@ -259,7 +259,7 @@ export function createMicroServer(options: MicroServerOptions = {}): {
       sendJson(res, 200, {
         status: "ok",
         engine: "search100x-micro",
-        version: "4.2.0",
+        version: "4.3.0",
         uptimeSeconds: Math.round(process.uptime()),
         memory: {
           rssMb: +(mem.rss / (1024 * 1024)).toFixed(2),
@@ -303,12 +303,15 @@ export function createMicroServer(options: MicroServerOptions = {}): {
         return;
       }
 
+      const useBrowser = qParams.get("browser") === "true" || qParams.get("browser") === "1";
+      const browserOpts = useBrowser ? { enabled: true } : undefined;
+
       try {
         let content: string | undefined;
         if (focusQuery) {
-          content = await fetchRelevantContent(targetUrl, focusQuery, { maxChars, timeoutMs });
+          content = await fetchRelevantContent(targetUrl, focusQuery, { maxChars, timeoutMs, browser: browserOpts });
         } else {
-          content = await fetchPageContent(targetUrl, timeoutMs, maxChars);
+          content = await fetchPageContent(targetUrl, timeoutMs, maxChars, browserOpts);
         }
 
         if (!content) {
@@ -347,7 +350,7 @@ export function createMicroServer(options: MicroServerOptions = {}): {
         // Return API help info
         sendJson(res, 200, {
           engine: "search100x-micro",
-          version: "4.2.0",
+          version: "4.3.0",
           endpoints: {
             "GET /search?q={query}": "Search multi-source consensus index",
             "GET /search?q={query}&format=json": "Drop-in SearXNG compatible search response",
@@ -412,12 +415,15 @@ export function createMicroServer(options: MicroServerOptions = {}): {
       }
 
       const sources = sourcesParam ? (sourcesParam.split(",").map((s) => s.trim()) as SourceName[]) : undefined;
+      const browserParam = qParams.get("browser");
+      const useBrowser = browserParam === "true" || browserParam === "1";
       const searchOptions: SearchOptions = {
         limit: Math.min(Math.max(1, limit), 50),
         sources,
         scopedDomains,
         enrichTopN: enrich,
         scoringPreset,
+        browser: useBrowser ? { enabled: true } : undefined,
       };
 
       // ── Handle SSE Streaming Mode ───────────────────────────────────────────
@@ -495,7 +501,7 @@ export async function startMicroServer(options: MicroServerOptions = {}): Promis
         const heapMb = (mem.heapUsed / (1024 * 1024)).toFixed(1);
 
         console.log(`\n┌─────────────────────────────────────────────────────────────┐`);
-        console.log(`│ search100x Micro-Server (v4.2.0)                             │`);
+        console.log(`│ search100x Micro-Server (v4.3.0)                             │`);
         console.log(`│ Free Metasearch & SearXNG Drop-in Engine                    │`);
         console.log(`├─────────────────────────────────────────────────────────────┤`);
         console.log(`│ Web UI:       http://${host === "0.0.0.0" ? "localhost" : host}:${port}/                     │`);

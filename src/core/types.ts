@@ -145,6 +145,8 @@ export interface SearchConfig {
   /** Self-hosted or public SearXNG instance — adds ~70 sub-engines in one call */
   searxng?: SearXNGConfig;
   logger?: Logger;
+  /** Silent browser automation options (Chrome DevTools Protocol) */
+  browser?: import("./browser.js").BrowserOptions;
 }
 
 
@@ -213,6 +215,8 @@ export interface SearchOptions {
   deep?: boolean;
   /** Disable early-return and wait for all scheduled engines to complete or timeout */
   noEarlyReturn?: boolean;
+  /** Silent browser automation options (Chrome DevTools Protocol) */
+  browser?: import("./browser.js").BrowserOptions;
 }
 
 export type DomainCategory = "legal" | "tech" | "business" | "academic" | "medical";
@@ -237,3 +241,5 @@ export interface Logger {
   log(msg: string): void;
   debug?(msg: string): void;
 }
+
+export type { BrowserOptions, BrowserPageResult } from "./browser.js";

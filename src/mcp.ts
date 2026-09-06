@@ -14,7 +14,7 @@ import { fetchPageContent, fetchRelevantContent } from "./core/fetcher.js";
 // ── MCP Server Constants ─────────────────────────────────────────────────────
 
 export const MCP_SERVER_NAME = "search100x";
-export const MCP_SERVER_VERSION = "4.2.0";
+export const MCP_SERVER_VERSION = "4.3.0";
 export const MCP_PROTOCOL_VERSION = "2024-11-05";
 
 export const MCP_DEFAULT_SEARCH_LIMIT = 10;
@@ -169,6 +169,10 @@ export const MCP_TOOLS: McpToolDefinition[] = [
           type: "number",
           description: "Maximum characters to extract (default: 3000)",
         },
+        browser: {
+          type: "boolean",
+          description: "Enable silent headless browser automation (CDP) for JavaScript-heavy or bot-protected pages. Requires explicit user consent.",
+        },
       },
       required: ["url"],
     },
@@ -194,6 +198,10 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         preset: {
           type: "string",
           description: "Optional domain preset (e.g. 'india-legal', 'us-legal', 'academic')",
+        },
+        browser: {
+          type: "boolean",
+          description: "Enable silent headless browser automation fallback for JavaScript-rendered sites or bot-blocked pages.",
         },
       },
       required: ["query"],
@@ -289,6 +297,7 @@ interface FetchPageContentParams {
   url: string;
   query?: string;
   maxChars: number;
+  browser?: boolean;
 }
 
 function parseFetchPageContentParams(args: unknown): FetchPageContentParams {
@@ -310,7 +319,9 @@ function parseFetchPageContentParams(args: unknown): FetchPageContentParams {
     maxChars = Math.max(50, Math.floor(record.maxChars));
   }
 
-  return { url, query, maxChars };
+  const browser = record.browser === true;
+
+  return { url, query, maxChars, browser };
 }
 
 // ── Tool Execution Handler ───────────────────────────────────────────────────
@@ -434,17 +445,19 @@ export async function handleToolCall(
     case "fetch_page_content": {
       try {
         const params = parseFetchPageContentParams(args);
+        const browserOpts = params.browser ? { enabled: true } : undefined;
         let content: string | undefined;
 
         if (params.query) {
           content = await fetchRelevantContent(params.url, params.query, {
             maxChars: params.maxChars,
             timeoutMs: MCP_DEFAULT_FETCH_TIMEOUT_MS,
+            browser: browserOpts,
           });
         }
 
         if (!content) {
-          content = await fetchPageContent(params.url, MCP_DEFAULT_FETCH_TIMEOUT_MS, params.maxChars);
+          content = await fetchPageContent(params.url, MCP_DEFAULT_FETCH_TIMEOUT_MS, params.maxChars, browserOpts);
         }
 
         if (!content || !content.trim()) {
@@ -494,11 +507,13 @@ export async function handleToolCall(
         const enrichCount = typeof record.enrichCount === "number" ? Math.max(1, Math.min(5, Math.floor(record.enrichCount))) : 3;
         const preset = typeof record.preset === "string" && record.preset.trim() ? record.preset.trim() : undefined;
         const scopedDomains = preset ? resolvePresetDomains(preset) : undefined;
+        const browser = record.browser === true;
 
         const response = await search.search(query, {
           limit,
           scopedDomains,
           enrichContent: enrichCount,
+          browser: browser ? { enabled: true } : undefined,
         });
 
         // Format into high-signal, LLM-ready markdown documentation

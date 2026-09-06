@@ -117,4 +117,9 @@ export { HackerNewsEngine } from "./adapters/hackernews.js";
 export { GitHubEngine }     from "./adapters/github.js";
 export { ArXivEngine }      from "./adapters/arxiv.js";
 
+// v4.3.0 exports — silent browser automation via Chrome DevTools Protocol (CDP)
+export { fetchWithBrowser, findSystemBrowser, isCdpRunning, CdpConnection } from "./core/browser.js";
+export type { BrowserOptions, BrowserPageResult } from "./core/browser.js";
+
+
 
