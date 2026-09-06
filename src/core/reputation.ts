@@ -3,9 +3,20 @@ const BOOST_DOMAINS: Record<string, number> = {
   "github.com": 0.85, "stackoverflow.com": 0.82, "developer.mozilla.org": 0.90,
   "docs.python.org": 0.88, "pkg.go.dev": 0.85, "crates.io": 0.82,
   "nodejs.org": 0.88, "npmjs.com": 0.80, "pypi.org": 0.80,
+  "huggingface.co": 0.88, "news.ycombinator.com": 0.85, "gitlab.com": 0.82,
+  "kubernetes.io": 0.88, "docker.com": 0.85, "bleepingcomputer.com": 0.85,
+  "nvd.nist.gov": 0.95, "cve.mitre.org": 0.95, "owasp.org": 0.88,
+  // Business & Finance
+  "bloomberg.com": 0.88, "wsj.com": 0.86, "cnbc.com": 0.82, "hbr.org": 0.88,
+  "marketwatch.com": 0.82, "forbes.com": 0.80, "fortune.com": 0.80,
+  "techcrunch.com": 0.82, "venturebeat.com": 0.80, "crunchbase.com": 0.82,
+  "economictimes.indiatimes.com": 0.85, "livemint.com": 0.85,
+  "business-standard.com": 0.85, "moneycontrol.com": 0.84,
+  "financialexpress.com": 0.82, "investopedia.com": 0.82,
+  "coindesk.com": 0.82, "cointelegraph.com": 0.80, "defillama.com": 0.85,
   // News
   "reuters.com": 0.85, "apnews.com": 0.85, "bbc.com": 0.82,
-  "ft.com": 0.82, "economist.com": 0.82, "theatlantic.com": 0.78,
+  "ft.com": 0.85, "economist.com": 0.85, "theatlantic.com": 0.78,
   // Legal/regulatory
   "law.cornell.edu": 0.95, "sec.gov": 0.95, "eur-lex.europa.eu": 0.95,
   // Indian legal sources
@@ -21,8 +32,9 @@ const BOOST_DOMAINS: Record<string, number> = {
   // Indian legal news / commentary / case law reporters
   "livelaw.in": 0.98, "barandbench.com": 0.98, "scconline.com": 0.98,
   "thehindu.com": 0.90, "indianexpress.com": 0.90, "scobserver.in": 0.98,
-  // Academic
-  "scholar.google.com": 0.88, "semanticscholar.org": 0.85,
+  // Academic & Science
+  "scholar.google.com": 0.88, "semanticscholar.org": 0.85, "arxiv.org": 0.92,
+  "nature.com": 0.92, "science.org": 0.92, "pubmed.ncbi.nlm.nih.gov": 0.95,
 };
 
 const PENALISE_PATTERNS = [

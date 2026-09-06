@@ -1,4 +1,4 @@
-export { EnhancedSearch, ResultCache, FileResultCache, DOMAIN_PRESETS } from "./search.js";
+export { EnhancedSearch, ResultCache, FileResultCache, DOMAIN_PRESETS, DOMAIN_CATEGORIES, getCategoryDomains, listDomainCategories, listDomainPresets, resolvePresetDomains } from "./search.js";
 export { cacheKey } from "./core/cache.js";
 export { SqliteResultCache } from "./core/sqlite-cache.js";
 export type { IResultCache } from "./core/cache.js";
@@ -13,8 +13,10 @@ export type {
   MergedResult,
   TimeRange,
   ResultType,
+  DomainCategory,
+  DomainCategoryInfo,
 } from "./core/types.js";
-export { ENGINE_WEIGHTS, K, rrfScore, normaliseScores, urlAuthorityScore, recencyScore, cascadeScore, DEFAULT_WEIGHTS, NEWS_WEIGHTS, LEGAL_WEIGHTS, ACADEMIC_WEIGHTS, SCORING_PRESETS } from "./core/scorer.js";
+export { ENGINE_WEIGHTS, K, rrfScore, normaliseScores, urlAuthorityScore, recencyScore, cascadeScore, DEFAULT_WEIGHTS, NEWS_WEIGHTS, LEGAL_WEIGHTS, ACADEMIC_WEIGHTS, TECH_WEIGHTS, BUSINESS_WEIGHTS, SCORING_PRESETS } from "./core/scorer.js";
 export type { CascadeWeights } from "./core/scorer.js";
 export { normalizeUrl, urlKey } from "./core/normalizer.js";
 export { bm25Scores, blendScores, BM25_ALPHA, normaliseScores as normaliseBm25Scores, legalCitations } from "./core/bm25.js";

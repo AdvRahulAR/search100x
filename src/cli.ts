@@ -14,7 +14,7 @@
  * Env:     BRAVE_API_KEY, TAVILY_API_KEY, GOOGLE_API_KEY, GOOGLE_CX, NEWS_REGION
  */
 
-import { EnhancedSearch, DOMAIN_PRESETS } from "./search.js";
+import { EnhancedSearch, DOMAIN_PRESETS, DOMAIN_CATEGORIES, resolvePresetDomains } from "./search.js";
 import { SourceName } from "./core/types.js";
 import { startMcpServer } from "./mcp.js";
 import { startMicroServer } from "./micro-server.js";
@@ -32,7 +32,7 @@ interface CliArgs {
   maxWaitMs?:    number;
   deep?:         boolean;
   noEarlyReturn?: boolean;
-  scoringPreset?: "default" | "news" | "legal" | "academic";
+  scoringPreset?: "default" | "news" | "legal" | "academic" | "tech" | "business";
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -52,8 +52,12 @@ Options:
   --host <ip>          Host interface for micro-server (default: 0.0.0.0)
   --limit <n>          Max results (default: 10)
   --sources <a,b,...>  Comma-separated engine names
-  --preset <name>      Domain preset: india-legal | us-legal | uk-legal |
-                       eu-legal | au-legal | sg-legal | academic
+  --preset <name>      Domain preset or category:
+                       Categories: legal | tech | business | academic | medical
+                       Presets:    india-legal | us-legal | uk-legal | eu-legal | au-legal | sg-legal |
+                                   tech | tech-ai | tech-dev | tech-security | tech-cloud |
+                                   business | business-india | finance | crypto | startups |
+                                   academic | medical
   --scope <d1,d2,...>  Custom domain restriction (site: filter), e.g.
                        --scope legislation.gov.uk,ico.org.uk
   --region <CC>        News region ISO 3166-1 code (default: US)
@@ -92,7 +96,7 @@ Examples:
   let maxWaitMs: number | undefined;
   let deep: boolean | undefined;
   let noEarlyReturn: boolean | undefined;
-  let presetName: "default" | "news" | "legal" | "academic" | undefined;
+  let presetName: "default" | "news" | "legal" | "academic" | "tech" | "business" | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -108,13 +112,24 @@ Examples:
     if (a === "--deep")            { deep = true; continue; }
     if (a === "--no-early-return") { noEarlyReturn = true; continue; }
     if (a === "--preset") {
-      const name = args[++i];
-      if (!DOMAIN_PRESETS[name]) {
-        console.error(`Unknown preset "${name}". Available: ${Object.keys(DOMAIN_PRESETS).join(", ")}`);
+      const rawName = args[++i];
+      const resolved = resolvePresetDomains(rawName);
+      if (!resolved) {
+        const available = [...Object.keys(DOMAIN_CATEGORIES), ...Object.keys(DOMAIN_PRESETS)];
+        console.error(`Unknown preset "${rawName}". Available presets & categories:\n  ${available.join(", ")}`);
         process.exit(1);
       }
-      scope = DOMAIN_PRESETS[name];
-      presetName = name.includes("legal") ? "legal" : (name === "academic" ? "academic" : undefined);
+      scope = resolved;
+      const lower = rawName.toLowerCase();
+      if (lower.includes("legal")) {
+        presetName = "legal";
+      } else if (lower === "academic") {
+        presetName = "academic";
+      } else if (lower.startsWith("tech")) {
+        presetName = "tech";
+      } else if (lower === "business" || lower === "business-india" || lower === "finance" || lower === "crypto" || lower === "startups") {
+        presetName = "business";
+      }
       continue;
     }
     if (a === "--scope") {

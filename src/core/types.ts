@@ -191,8 +191,10 @@ export interface SearchOptions {
    * "news"     → freshness-weighted (recency×0.25)
    * "legal"    → authority + term precision, near-zero recency
    * "academic" → authority-heavy, term precision high
+   * "tech"     → developer, documentation, code & community focused
+   * "business" → market, finance, corporate, startup & economics focused
    */
-  scoringPreset?: "default" | "news" | "legal" | "academic";
+  scoringPreset?: "default" | "news" | "legal" | "academic" | "tech" | "business";
   /** Re-rank top-N results using a cross-encoder model after RRF+BM25 scoring.
    * Requires onnxruntime-node and the bundled ONNX model. Default: false.
    */
@@ -211,6 +213,15 @@ export interface SearchOptions {
   deep?: boolean;
   /** Disable early-return and wait for all scheduled engines to complete or timeout */
   noEarlyReturn?: boolean;
+}
+
+export type DomainCategory = "legal" | "tech" | "business" | "academic" | "medical";
+
+export interface DomainCategoryInfo {
+  name: string;
+  description: string;
+  presets: Record<string, string[]>;
+  allDomains: string[];
 }
 
 export interface SearchResponse {

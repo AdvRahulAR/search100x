@@ -17,7 +17,7 @@
 
 import http, { IncomingMessage, ServerResponse } from "node:http";
 import { URL } from "node:url";
-import { EnhancedSearch, DOMAIN_PRESETS } from "./search.js";
+import { EnhancedSearch, DOMAIN_PRESETS, DOMAIN_CATEGORIES, resolvePresetDomains } from "./search.js";
 import { fetchRelevantContent, fetchPageContent } from "./core/fetcher.js";
 import { SourceName, SearchOptions, SearchResult, SearchConfig } from "./core/types.js";
 
@@ -281,7 +281,13 @@ export function createMicroServer(options: MicroServerOptions = {}): {
 
     // ── Route: /presets ───────────────────────────────────────────────────────
     if (pathname === "/presets") {
-      sendJson(res, 200, DOMAIN_PRESETS);
+      sendJson(res, 200, { ...DOMAIN_PRESETS, _categories: DOMAIN_CATEGORIES });
+      return;
+    }
+
+    // ── Route: /categories ────────────────────────────────────────────────────
+    if (pathname === "/categories") {
+      sendJson(res, 200, DOMAIN_CATEGORIES);
       return;
     }
 
@@ -373,13 +379,36 @@ export function createMicroServer(options: MicroServerOptions = {}): {
         qParams.has("pageno");
 
       let scopedDomains: string[] | undefined;
-      let scoringPreset: "default" | "news" | "legal" | "academic" | undefined;
+      let scoringPreset: "default" | "news" | "legal" | "academic" | "tech" | "business" | undefined;
 
-      if (preset && DOMAIN_PRESETS[preset]) {
-        scopedDomains = DOMAIN_PRESETS[preset];
-        scoringPreset = preset.includes("legal") ? "legal" : (preset === "academic" ? "academic" : undefined);
+      if (preset) {
+        scopedDomains = resolvePresetDomains(preset);
+        if (scopedDomains) {
+          const lower = preset.toLowerCase();
+          if (lower.includes("legal")) scoringPreset = "legal";
+          else if (lower === "academic") scoringPreset = "academic";
+          else if (lower.startsWith("tech")) scoringPreset = "tech";
+          else if (lower === "business" || lower === "business-india" || lower === "finance" || lower === "crypto" || lower === "startups") scoringPreset = "business";
+        }
       } else if (scope) {
         scopedDomains = scope.split(",").map((s) => s.trim()).filter(Boolean);
+      } else if (qParams.has("categories")) {
+        const searxCat = (qParams.get("categories") ?? "").toLowerCase();
+        if (searxCat.includes("it") || searxCat.includes("tech")) {
+          scopedDomains = resolvePresetDomains("tech");
+          scoringPreset = "tech";
+        } else if (searxCat.includes("science")) {
+          scopedDomains = resolvePresetDomains("academic");
+          scoringPreset = "academic";
+        } else if (searxCat.includes("news")) {
+          scoringPreset = "news";
+        } else if (searxCat.includes("finance") || searxCat.includes("business")) {
+          scopedDomains = resolvePresetDomains("business");
+          scoringPreset = "business";
+        } else if (searxCat.includes("legal")) {
+          scopedDomains = resolvePresetDomains("legal");
+          scoringPreset = "legal";
+        }
       }
 
       const sources = sourcesParam ? (sourcesParam.split(",").map((s) => s.trim()) as SourceName[]) : undefined;

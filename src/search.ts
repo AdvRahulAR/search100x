@@ -37,7 +37,7 @@ import { HackerNewsEngine } from "./adapters/hackernews.js";
 import { GitHubEngine } from "./adapters/github.js";
 import { ArXivEngine } from "./adapters/arxiv.js";
 
-export { DOMAIN_PRESETS }         from "./core/transformer.js";
+export { DOMAIN_PRESETS, DOMAIN_CATEGORIES, getCategoryDomains, listDomainCategories, listDomainPresets, resolvePresetDomains } from "./core/transformer.js";
 export { ResultCache, FileResultCache } from "./core/cache.js";
 
 const DEFAULT_TIMEOUT = 7000;
@@ -133,7 +133,7 @@ export class EnhancedSearch {
 
     const bundle    = buildQueryBundle(query, scopedDomains, resolvedTimeRange, page);
     const weights   = SCORING_PRESETS[preset] ?? DEFAULT_WEIGHTS;
-    const halfLife  = preset === "legal" || preset === "academic" ? 365 : (preset === "news" ? 3 : 30);
+    const halfLife  = preset === "legal" || preset === "academic" ? 365 : (preset === "news" ? 3 : (preset === "business" ? 14 : (preset === "tech" ? 90 : 30)));
     const container = new ResultContainer(query);
 
     const liveIntent = detectLiveIntent(query);
@@ -431,12 +431,15 @@ export class EnhancedSearch {
     const isLegalPreset = preset === "legal" || (scopedDomains && scopedDomains.some(d => d.includes(".nic.in") || d.includes("kanoon") || d.includes("livelaw")));
     const isAcademic = preset === "academic";
     const isTech = preset === "tech";
+    const isBusiness = preset === "business";
     const DEFAULT_EXCLUDED: SourceName[] = isLegalPreset
       ? ["openalex", "arxiv", "github"]
       : isAcademic
       ? ["indiacode", "sebi", "github"]
       : isTech
       ? ["openalex", "indiacode", "sebi", "arxiv"]
+      : isBusiness
+      ? ["openalex", "arxiv", "indiacode"]
       : ["openalex", "arxiv", "indiacode", "sebi"];
     const VARIANT: Record<SourceName, QueryVariant> = {
       duckduckgo:   "primary",

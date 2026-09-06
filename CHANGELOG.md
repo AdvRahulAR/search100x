@@ -14,8 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **ArXiv Preprints Engine** (`src/adapters/arxiv.ts`): Queries ArXiv's public Atom XML API with zero keys, extracting scientific preprints, abstracts, authors, and canonical paper links.
 - **RAG Prompt Context Budgeter (`toPromptContext`)** (`src/core/documents.ts`):
   - Transforms search results into clean numeric citations (`[1]`, `[2]`, `[3]`) with strict token and character budgeting ready to inject into any LLM prompt (Claude, OpenAI, Gemini, Ollama, LangChain).
-- **New `"tech"` Domain Preset**:
-  - Automatically scopes queries to `github.com`, `news.ycombinator.com`, `stackoverflow.com`, `dev.to`, and `huggingface.co`.
+- **Curated Domain Categories & Presets**:
+  - Structured industry & research domain registry: **Legal**, **Tech**, **Business**, **Academic**, and **Medical** (`DOMAIN_CATEGORIES`).
+  - Added specialized presets: `business`, `business-india`, `finance`, `crypto`, `startups`, `tech-ai`, `tech-dev`, `tech-security`, `tech-cloud`, and `medical`.
+  - Added resolution utilities: `getCategoryDomains()`, `resolvePresetDomains()`, `listDomainCategories()`, `listDomainPresets()`.
+  - Added dedicated scoring presets `TECH_WEIGHTS` and `BUSINESS_WEIGHTS` to `SCORING_PRESETS`.
+  - Updated CLI (`--preset`) and MCP (`web_search`, `search_and_read`, `list_domain_presets`) to seamlessly resolve both categories and presets.
 
 ---
 

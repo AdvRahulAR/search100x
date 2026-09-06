@@ -52,12 +52,18 @@ export const NEWS_WEIGHTS: CascadeWeights     = { rrf: 0.40, bm25: 0.25, authori
 export const LEGAL_WEIGHTS: CascadeWeights    = { rrf: 0.45, bm25: 0.35, authority: 0.18, recency: 0.02 };
 /** Academic — authority (gov/edu/org) and term match dominate */
 export const ACADEMIC_WEIGHTS: CascadeWeights = { rrf: 0.42, bm25: 0.33, authority: 0.22, recency: 0.03 };
+/** Tech / developer — code repositories, Q&A, and technical docs */
+export const TECH_WEIGHTS: CascadeWeights     = { rrf: 0.45, bm25: 0.32, authority: 0.15, recency: 0.08 };
+/** Business / finance — market updates, company filings, earnings, business journalism */
+export const BUSINESS_WEIGHTS: CascadeWeights = { rrf: 0.42, bm25: 0.28, authority: 0.18, recency: 0.12 };
 
 export const SCORING_PRESETS: Record<string, CascadeWeights> = {
   default:  DEFAULT_WEIGHTS,
   news:     NEWS_WEIGHTS,
   legal:    LEGAL_WEIGHTS,
   academic: ACADEMIC_WEIGHTS,
+  tech:     TECH_WEIGHTS,
+  business: BUSINESS_WEIGHTS,
 };
 
 // ── Cascade blend ─────────────────────────────────────────────────────────────

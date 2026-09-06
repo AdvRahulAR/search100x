@@ -548,26 +548,58 @@ const res = await s.search("query", { rerank: true, rerankCandidates: 20 });
 
 ---
 
-## Domain presets
+## Domain Categories & Presets
 
-Named sets of authoritative domains for jurisdiction-scoped searches:
+`search100x` packages curated, authoritative domain directories structured into 5 core industry categories: **Legal**, **Tech**, **Business**, **Academic**, and **Medical**.
+
+### 1. Categories & Presets Catalog
+
+| Category | Presets Included | Focus Domains |
+|---|---|---|
+| **Legal** | `legal`, `india-legal`, `us-legal`, `uk-legal`, `eu-legal`, `au-legal`, `sg-legal` | `law.cornell.edu`, `indiacode.nic.in`, `eur-lex.europa.eu`, `legislation.gov.uk`, `courtlistener.com`, `supremecourt.gov` |
+| **Tech** | `tech`, `tech-ai`, `tech-dev`, `tech-security`, `tech-cloud` | `github.com`, `huggingface.co`, `news.ycombinator.com`, `cve.mitre.org`, `nvd.nist.gov`, `kubernetes.io`, `aws.amazon.com` |
+| **Business** | `business`, `business-india`, `finance`, `crypto`, `startups` | `bloomberg.com`, `reuters.com`, `wsj.com`, `ft.com`, `techcrunch.com`, `coindesk.com`, `livemint.com`, `economictimes.indiatimes.com` |
+| **Academic** | `academic` | `arxiv.org`, `pubmed.ncbi.nlm.nih.gov`, `ssrn.com`, `jstor.org`, `nature.com`, `science.org` |
+| **Medical** | `medical` | `ncbi.nlm.nih.gov`, `who.int`, `cdc.gov`, `thelancet.com`, `nejm.org`, `fda.gov`, `mayoclinic.org` |
+
+### 2. Programmatic Usage
 
 ```typescript
-import { DOMAIN_PRESETS } from "search100x";
+import { 
+  DOMAIN_PRESETS, 
+  DOMAIN_CATEGORIES, 
+  getCategoryDomains, 
+  resolvePresetDomains 
+} from "search100x";
 
-DOMAIN_PRESETS["tech"]         // github.com, news.ycombinator.com, stackoverflow.com, dev.to, huggingface.co
-DOMAIN_PRESETS["india-legal"]  // indiacode.nic.in, sebi.gov.in, rbi.org.in, supremecourt.gov.in ...
-DOMAIN_PRESETS["us-legal"]     // law.cornell.edu, federalregister.gov, sec.gov, congress.gov ...
-DOMAIN_PRESETS["uk-legal"]     // legislation.gov.uk, gov.uk, ico.org.uk, fca.org.uk ...
-DOMAIN_PRESETS["eu-legal"]     // eur-lex.europa.eu, ec.europa.eu, edpb.europa.eu ...
-DOMAIN_PRESETS["au-legal"]     // legislation.gov.au, oaic.gov.au, asic.gov.au ...
-DOMAIN_PRESETS["sg-legal"]     // sso.agc.gov.sg, pdpc.gov.sg, mas.gov.sg ...
-DOMAIN_PRESETS["academic"]     // arxiv.org, pubmed.ncbi.nlm.nih.gov, ssrn.com ...
+// 1. Resolve an entire category (e.g. all curated tech domains)
+const techDomains = getCategoryDomains("tech");
 
-// Custom domain scope
-const res = await s.search("AI Act", {
-  scopedDomains: ["eur-lex.europa.eu", "ec.europa.eu"],
+// 2. Resolve a specific preset or category name dynamically
+const startupDomains = resolvePresetDomains("startups");
+const legalDomains   = resolvePresetDomains("legal");
+
+// 3. Pass directly to search with optimized scoring preset
+const s = new EnhancedSearch();
+const res = await s.search("series A valuations AI startups", {
+  scopedDomains: resolvePresetDomains("startups"),
+  scoringPreset: "business",
+  limit: 5,
 });
+```
+
+### 3. CLI Usage with Categories & Presets
+
+```bash
+# Scope by high-level category
+npx search100x "interest rate inflation" --preset business
+npx search100x "data privacy obligations" --preset legal
+npx search100x "kubernetes privilege escalation" --preset tech
+
+# Scope by specialized sub-preset
+npx search100x "seed stage term sheet" --preset startups
+npx search100x "solana dex liquidity" --preset crypto
+npx search100x "rbi draft directions fintech" --preset business-india
 ```
 
 ---

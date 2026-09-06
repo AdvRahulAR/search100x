@@ -7,7 +7,7 @@
  */
 
 import * as readline from "node:readline";
-import { EnhancedSearch, DOMAIN_PRESETS } from "./search.js";
+import { EnhancedSearch, DOMAIN_PRESETS, DOMAIN_CATEGORIES, resolvePresetDomains } from "./search.js";
 import { SearchConfig, TimeRange } from "./core/types.js";
 import { fetchPageContent, fetchRelevantContent } from "./core/fetcher.js";
 
@@ -109,7 +109,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         },
         preset: {
           type: "string",
-          description: "Domain preset name (india-legal | us-legal | uk-legal | eu-legal | au-legal | sg-legal | academic)",
+          description: "Domain preset or category (legal | tech | business | academic | medical | india-legal | us-legal | uk-legal | eu-legal | tech-ai | tech-security | finance | crypto | startups | etc.)",
         },
         enrichContent: {
           type: "number",
@@ -325,25 +325,31 @@ export async function handleToolCall(
       try {
         const params = parseWebSearchParams(args);
         let scopedDomains: string[] | undefined;
-        let scoringPreset: "default" | "news" | "legal" | "academic" | undefined;
+        let scoringPreset: "default" | "news" | "legal" | "academic" | "tech" | "business" | undefined;
 
         if (params.preset) {
-          scopedDomains = DOMAIN_PRESETS[params.preset];
+          scopedDomains = resolvePresetDomains(params.preset);
           if (!scopedDomains) {
+            const available = [...Object.keys(DOMAIN_CATEGORIES), ...Object.keys(DOMAIN_PRESETS)];
             return {
               isError: true,
               content: [
                 {
                   type: "text",
-                  text: `Unknown preset "${params.preset}". Available presets: ${Object.keys(DOMAIN_PRESETS).join(", ")}`,
+                  text: `Unknown preset "${params.preset}". Available presets & categories: ${available.join(", ")}`,
                 },
               ],
             };
           }
-          if (params.preset.includes("legal")) {
+          const lower = params.preset.toLowerCase();
+          if (lower.includes("legal")) {
             scoringPreset = "legal";
-          } else if (params.preset === "academic") {
+          } else if (lower === "academic") {
             scoringPreset = "academic";
+          } else if (lower.startsWith("tech")) {
+            scoringPreset = "tech";
+          } else if (lower === "business" || lower === "business-india" || lower === "finance" || lower === "crypto" || lower === "startups") {
+            scoringPreset = "business";
           }
         }
 
@@ -487,7 +493,7 @@ export async function handleToolCall(
         const limit = typeof record.limit === "number" ? Math.max(1, Math.min(15, Math.floor(record.limit))) : 5;
         const enrichCount = typeof record.enrichCount === "number" ? Math.max(1, Math.min(5, Math.floor(record.enrichCount))) : 3;
         const preset = typeof record.preset === "string" && record.preset.trim() ? record.preset.trim() : undefined;
-        const scopedDomains = preset ? DOMAIN_PRESETS[preset] : undefined;
+        const scopedDomains = preset ? resolvePresetDomains(preset) : undefined;
 
         const response = await search.search(query, {
           limit,
@@ -538,7 +544,10 @@ export async function handleToolCall(
         content: [
           {
             type: "text",
-            text: JSON.stringify(DOMAIN_PRESETS, null, 2),
+            text: JSON.stringify({
+              ...DOMAIN_PRESETS,
+              _categories: DOMAIN_CATEGORIES,
+            }, null, 2),
           },
         ],
       };
