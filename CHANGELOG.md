@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2026-09-06
+
+### Added
+- **Ultra-Lightweight Micro-Server (<25MB RAM)** (`src/micro-server.ts`):
+  - Built with native `node:http` (zero external web framework dependencies, ~8.5MB heap footprint).
+  - **Drop-in SearXNG API compatibility**: Responds to `/search?q=...&format=json` with exact SearXNG JSON schema for seamless compatibility with LangChain `SearxngSearchWrapper`, Dify, Open WebUI, and AutoGPT.
+  - **Embedded Web UI**: Single-file dark-mode search interface (<5KB HTML/CSS, zero external assets).
+  - **SSE Streaming**: Real-time Server-Sent Events stream for early result display (`/search?stream=true`).
+  - **Passage Reader Endpoint**: Direct BM25 grounded content extraction (`/read?url=...&q=...`).
+  - **CLI Subcommand**: `search100x serve [--port 3000] [--host 0.0.0.0]`.
+- **Sandbox & Isomorphic Runtime** (`src/sandbox.ts`):
+  - Pure in-memory execution pipeline with zero filesystem dependencies for Web Workers, Cloudflare Workers, Deno, and browser extensions. Exported via `search100x/sandbox`.
+- **Startpage Zero-Key Adapter** (`src/adapters/startpage.ts`):
+  - Privacy-preserving Google index search with zero required API keys.
+- **One-Shot `search_and_read` MCP Tool** (`src/mcp.ts`):
+  - Allows AI agents to retrieve grounded, BM25-ranked passages across multi-engine consensus in a single round trip.
+- **SQLite Persistent Cache** (`src/core/sqlite-cache.ts`):
+  - Native `node:sqlite` caching for Node 22+ with automatic in-memory fallback.
+
+### Fixed
+- **SearXNG Cloud IP Bypass & Fallback Pool** (`src/adapters/searxng.ts`):
+  - Fixed 0-result blocks on datacenter IPs (Replit/GCP) by configuring default sub-engines to `bing,wikipedia` and added automatic multi-instance failover (`fallbackUrls`).
+- **Dynamic Engine Failover**: Auto-cascades to `DuckDuckGoLiteEngine` or fallback engines on 429/CAPTCHA.
+
+---
+
 ## [4.0.0] - 2026-08-31
 
 ### Added

@@ -1,7 +1,7 @@
 {
   "name": "search100x",
-  "version": "4.0.0",
-  "description": "Multi-source web search for LLM grounding \u2014 works with any model provider",
+  "version": "4.1.0",
+  "description": "Multi-source web search for LLM grounding — works with any model provider",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -12,11 +12,20 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./sandbox": {
+      "import": "./dist/sandbox.js",
+      "types": "./dist/sandbox.d.ts"
+    },
+    "./micro-server": {
+      "import": "./dist/micro-server.js",
+      "types": "./dist/micro-server.d.ts"
     }
   },
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
+    "serve": "node dist/cli.js serve",
     "mcp": "node dist/cli.js --mcp",
     "test": "npm run build && node --test tests/*.test.js",
     "test:mock": "npm run build && node --test tests/mocks/*.test.js",

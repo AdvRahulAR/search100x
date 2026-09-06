@@ -14,7 +14,7 @@ import { fetchPageContent, fetchRelevantContent } from "./core/fetcher.js";
 // ── MCP Server Constants ─────────────────────────────────────────────────────
 
 export const MCP_SERVER_NAME = "search100x";
-export const MCP_SERVER_VERSION = "4.0.0";
+export const MCP_SERVER_VERSION = "4.1.0";
 export const MCP_PROTOCOL_VERSION = "2024-11-05";
 
 export const MCP_DEFAULT_SEARCH_LIMIT = 10;
@@ -171,6 +171,32 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         },
       },
       required: ["url"],
+    },
+  },
+  {
+    name: "search_and_read",
+    description: "One-shot AI agent grounding: searches the web across multiple engines and automatically extracts clean, BM25-ranked passages from the top pages in a single call.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "The search query to ground the answer",
+        },
+        limit: {
+          type: "number",
+          description: "Number of search results to inspect (default: 5, max: 15)",
+        },
+        enrichCount: {
+          type: "number",
+          description: "Number of top pages to fetch and extract passages from (default: 3, max: 5)",
+        },
+        preset: {
+          type: "string",
+          description: "Optional domain preset (e.g. 'india-legal', 'us-legal', 'academic')",
+        },
+      },
+      required: ["query"],
     },
   },
   {
@@ -442,6 +468,65 @@ export async function handleToolCall(
             {
               type: "text",
               text: `fetch_page_content error: ${errorMsg}`,
+            },
+          ],
+        };
+      }
+    }
+
+    case "search_and_read": {
+      try {
+        if (typeof args !== "object" || args === null) {
+          throw new Error("Invalid arguments: expected an object");
+        }
+        const record = args as Record<string, unknown>;
+        if (typeof record.query !== "string" || !record.query.trim()) {
+          throw new Error("Missing required argument 'query'");
+        }
+        const query = record.query.trim();
+        const limit = typeof record.limit === "number" ? Math.max(1, Math.min(15, Math.floor(record.limit))) : 5;
+        const enrichCount = typeof record.enrichCount === "number" ? Math.max(1, Math.min(5, Math.floor(record.enrichCount))) : 3;
+        const preset = typeof record.preset === "string" && record.preset.trim() ? record.preset.trim() : undefined;
+        const scopedDomains = preset ? DOMAIN_PRESETS[preset] : undefined;
+
+        const response = await search.search(query, {
+          limit,
+          scopedDomains,
+          enrichContent: enrichCount,
+        });
+
+        // Format into high-signal, LLM-ready markdown documentation
+        let markdown = `# Search Grounding for "${query}"\n\n`;
+        markdown += `*Found ${response.count} results across sources: ${response.sources.join(", ")} (${response.durationMs}ms)*\n\n`;
+
+        response.results.forEach((r, idx) => {
+          markdown += `### [${idx + 1}] ${r.title}\n`;
+          markdown += `**Source URL**: ${r.url}  \n`;
+          markdown += `**Engines**: ${r.sources.join(", ")} | **Score**: ${Math.round(r.score * 100) / 100}  \n\n`;
+          if (r.content && r.content.trim()) {
+            markdown += `> **Extracted Relevant Passages:**\n>\n> ${r.content.split("\n").join("\n> ")}\n\n`;
+          } else if (r.snippet) {
+            markdown += `> **Summary Snippet:**\n> ${r.snippet}\n\n`;
+          }
+          markdown += `---\n\n`;
+        });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: markdown.trim(),
+            },
+          ],
+        };
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `search_and_read error: ${errorMsg}`,
             },
           ],
         };

@@ -16,14 +16,15 @@ import {
 describe("MCP Server JSON-RPC 2.0 Protocol", () => {
   it("exports all tools and metadata", () => {
     assert.equal(MCP_SERVER_NAME, "search100x");
-    assert.equal(MCP_SERVER_VERSION, "4.0.0");
+    assert.equal(MCP_SERVER_VERSION, "4.1.0");
     assert.equal(MCP_PROTOCOL_VERSION, "2024-11-05");
-    assert.equal(MCP_TOOLS.length, 4);
+    assert.equal(MCP_TOOLS.length, 5);
 
     const toolNames = MCP_TOOLS.map((t) => t.name);
     assert.ok(toolNames.includes("web_search"));
     assert.ok(toolNames.includes("legal_search"));
     assert.ok(toolNames.includes("fetch_page_content"));
+    assert.ok(toolNames.includes("search_and_read"));
     assert.ok(toolNames.includes("list_domain_presets"));
   });
 
@@ -50,7 +51,7 @@ describe("MCP Server JSON-RPC 2.0 Protocol", () => {
     assert.equal(messages[0].id, 1);
     assert.equal(messages[0].result.protocolVersion, "2024-11-05");
     assert.equal(messages[0].result.serverInfo.name, "search100x");
-    assert.equal(messages[0].result.serverInfo.version, "4.0.0");
+    assert.equal(messages[0].result.serverInfo.version, "4.1.0");
     assert.ok(messages[0].result.capabilities.tools);
   });
 
@@ -106,7 +107,7 @@ describe("MCP Server JSON-RPC 2.0 Protocol", () => {
 
     assert.equal(messages.length, 1);
     assert.equal(messages[0].id, 2);
-    assert.equal(messages[0].result.tools.length, 4);
+    assert.equal(messages[0].result.tools.length, 5);
     assert.equal(messages[0].result.tools[0].name, "web_search");
   });
 

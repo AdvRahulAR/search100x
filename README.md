@@ -588,22 +588,38 @@ for await (const batch of s.searchStream("SEC enforcement actions 2024", {
 
 ---
 
-## HTTP API
+## Self-Hosted Micro-Server (<25MB RAM) & SearXNG Drop-in
 
-Start the server (requires `express` installed):
+`search100x` ships with a zero-dependency, ultra-lightweight HTTP server built on Node's native `node:http`. It runs on **~8.5MB heap (<25MB RAM)** and serves as a 100% free, self-hosted alternative to heavy SearXNG instances (which need Python, Redis, and ~300MB RAM).
 
 ```bash
-npm install express
-BRAVE_API_KEY=your_key TAVILY_API_KEY=your_key npm start
+# Start micro-server (zero extra dependencies required)
+npx search100x serve --port 3000
 ```
 
-```
-GET /search?q=GDPR+right+to+erasure
-GET /search?q=Competition+law+UK&preset=uk-legal&limit=10
-GET /search?q=EU+AI+Act&scope=eur-lex.europa.eu,ec.europa.eu&enrich=3
-GET /presets        — list all domain presets
-GET /metrics        — circuit breaker state per engine
-GET /health
+### Endpoints & Integrations:
+
+| Endpoint | Description |
+|---|---|
+| `GET /` | Embedded dark-mode Web UI (<5KB HTML, zero external assets) for browsers |
+| `GET /search?q=...` | Standard search100x JSON multi-source consensus search |
+| `GET /search?q=...&format=json` | **SearXNG drop-in API**: exact SearXNG JSON schema (works with LangChain, Dify, Open WebUI, AutoGPT) |
+| `GET /search?q=...&stream=true` | Server-Sent Events (SSE) streaming search |
+| `GET /read?url=...&q=...` | Grounded page reader: fetches URL and extracts top BM25 passages |
+| `GET /presets` | Lists domain presets (`india-legal`, `us-legal`, `uk-legal`, `academic`, etc.) |
+| `GET /health` | Health status and live memory usage stats |
+| `GET /metrics` | Circuit breaker status per search engine |
+
+### In-Browser & Sandbox Runtime (`search100x/sandbox`)
+
+For serverless environments, Cloudflare Workers, Deno, Web Workers, or browser extensions:
+
+```typescript
+import { createSandboxSearch, isomorphicSearch, isomorphicRead } from "search100x/sandbox";
+
+// Zero-filesystem, purely in-memory execution
+const results = await isomorphicSearch("EU AI Act obligations", { limit: 5 });
+const passage = await isomorphicRead("https://eur-lex.europa.eu/...", "fines");
 ```
 
 ---

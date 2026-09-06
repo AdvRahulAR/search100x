@@ -17,6 +17,7 @@
 import { EnhancedSearch, DOMAIN_PRESETS } from "./search.js";
 import { SourceName } from "./core/types.js";
 import { startMcpServer } from "./mcp.js";
+import { startMicroServer } from "./micro-server.js";
 
 interface CliArgs {
   query:         string;
@@ -43,8 +44,12 @@ search100x — multi-source web search for LLM grounding
 
 Usage:
   search100x "<query>" [options]
+  search100x serve [--port 3000] [--host 0.0.0.0]
+  search100x --mcp
 
 Options:
+  --port <n>           Port for HTTP micro-server (default: 3000)
+  --host <ip>          Host interface for micro-server (default: 0.0.0.0)
   --limit <n>          Max results (default: 10)
   --sources <a,b,...>  Comma-separated engine names
   --preset <name>      Domain preset: india-legal | us-legal | uk-legal |
@@ -193,6 +198,20 @@ async function main(): Promise<void> {
 
 if (process.argv.includes("--mcp")) {
   startMcpServer();
+} else if (process.argv[2] === "serve" || process.argv.includes("--serve")) {
+  let port = Number(process.env.PORT ?? 3000);
+  let host = process.env.HOST ?? "0.0.0.0";
+  for (let i = 2; i < process.argv.length; i++) {
+    if (process.argv[i] === "--port" && process.argv[i + 1]) {
+      port = Number(process.argv[++i]);
+    } else if (process.argv[i] === "--host" && process.argv[i + 1]) {
+      host = process.argv[++i];
+    }
+  }
+  startMicroServer({ port, host }).catch((err: unknown) => {
+    console.error("Micro-server failed:", err);
+    process.exit(1);
+  });
 } else {
   main().catch((err) => {
     console.error(err);

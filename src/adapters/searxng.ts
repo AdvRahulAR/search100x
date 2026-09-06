@@ -26,6 +26,14 @@ import { http } from "../core/http.js";
 /** Default SearXNG instance — hardcoded for zero-config usage. */
 const DEFAULT_SEARXNG_BASE_URL = "https://searxng.replit.app";
 const DEFAULT_SEARXNG_TOKEN   = "40b5ea00de6d9c6bac9e3844ad1832d6b1a295464cee1c9b148a74fb6626cc63";
+/** Default safe sub-engines that don't hit datacenter CAPTCHAs */
+const DEFAULT_SEARXNG_ENGINES = "bing,wikipedia";
+
+/** Known reliable public SearXNG fallback instances */
+const DEFAULT_FALLBACK_URLS = [
+  "https://search.mectov.my.id",
+  "https://sx.xo.st",
+];
 
 interface SearXNGResultItem {
   title?: string;
@@ -43,27 +51,53 @@ export class SearXNGEngine implements Engine {
     // Fall back to hardcoded defaults if not explicitly provided
     this.cfg.baseUrl = this.cfg.baseUrl ?? DEFAULT_SEARXNG_BASE_URL;
     this.cfg.token  = this.cfg.token  ?? DEFAULT_SEARXNG_TOKEN;
+    this.cfg.engines = this.cfg.engines ?? DEFAULT_SEARXNG_ENGINES;
   }
 
   async search(query: string, timeoutMs = 7_000, timeRange?: string): Promise<RawResult[]> {
+    const urlsToTry = [
+      this.cfg.baseUrl!,
+      ...(this.cfg.fallbackUrls ?? DEFAULT_FALLBACK_URLS),
+    ];
+
+    const perInstanceTimeout = Math.max(1500, Math.floor(timeoutMs / urlsToTry.length));
+
+    for (const baseUrl of urlsToTry) {
+      const isPrimary = baseUrl === this.cfg.baseUrl;
+      const results = await this.queryInstance(baseUrl, query, perInstanceTimeout, timeRange, isPrimary);
+      if (results.length > 0) {
+        return results;
+      }
+    }
+
+    return [];
+  }
+
+  private async queryInstance(
+    baseUrl: string,
+    query: string,
+    timeoutMs: number,
+    timeRange?: string,
+    useAuth = false
+  ): Promise<RawResult[]> {
+    const cleanBase = baseUrl.replace(/\/+$/, "");
     const params = new URLSearchParams({
       q:        query,
       format:   "json",
       language: this.cfg.language ?? "en",
     });
 
-    // Engine filter — blank = SearXNG default (all enabled engines)
     if (this.cfg.engines) params.set("engines", this.cfg.engines);
-
-    // Freshness: prefer the per-call timeRange over the config default
     const tr = timeRange ?? this.cfg.timeRange;
     if (tr) params.set("time_range", tr);
 
     const headers: Record<string, string> = { Accept: "application/json" };
-    if (this.cfg.token) headers["Authorization"] = `Bearer ${this.cfg.token}`;
+    if (useAuth && this.cfg.token) {
+      headers["Authorization"] = `Bearer ${this.cfg.token}`;
+    }
 
     try {
-      const res = await http.get(`${this.cfg.baseUrl}/search?${params}`, {
+      const res = await http.get(`${cleanBase}/search?${params}`, {
         timeout:      timeoutMs,
         headers,
         responseType: "json",

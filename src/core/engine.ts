@@ -45,4 +45,5 @@ export const ENGINE_TIMEOUTS: Record<string, number> = {
   indiacode:    5_000,
   sebi:         5_000,
   indiankanoon: 5_000,
+  startpage:    5_000,
 };

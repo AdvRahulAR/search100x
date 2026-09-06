@@ -173,6 +173,7 @@ export const ENGINE_WEIGHTS: Record<string, number> = {
   brave:      0.90,
   // Free web scrapers (SearXNG-derived mechanisms)
   duckduckgo: 0.80,
+  startpage:  0.85,
   bing:       0.75,
   mojeek:     0.65,
   marginalia: 0.62,

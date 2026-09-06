@@ -31,6 +31,8 @@ import { YepEngine }        from "./adapters/yep.js";
 import { OpenMeteoEngine }  from "./adapters/openmeteo.js";
 import { IndiaCodeEngine, SebiEngine } from "./adapters/indiacode.js";
 import { IndianKanoonEngine } from "./adapters/indiankanoon.js";
+import { StartpageEngine } from "./adapters/startpage.js";
+import { DuckDuckGoLiteEngine } from "./adapters/enhanced-engines.js";
 
 export { DOMAIN_PRESETS }         from "./core/transformer.js";
 export { ResultCache, FileResultCache } from "./core/cache.js";
@@ -220,10 +222,31 @@ export class EnhancedSearch {
               this.logger
             );
 
-            if (result === null || result.length === 0) {
-              if (result === null) this.circuit.recordFailure(engine.name);
+            let effectiveResult = result;
+            // Dynamic Failover (inspired by llm4free):
+            // If duckduckgo fails or returns 0 (e.g. CAPTCHA/bot-block), auto-fallback to DuckDuckGoLite
+            if ((effectiveResult === null || effectiveResult.length === 0) && engine.name === "duckduckgo") {
+              try {
+                const fallbackTimeout = Math.min(3000, Math.max(1000, deadline - Date.now()));
+                const ddgLite = new DuckDuckGoLiteEngine();
+                const liteRes = await withDeadline(
+                  ddgLite.search(bundle[variant], fallbackTimeout),
+                  fallbackTimeout,
+                  "duckduckgo-lite",
+                  this.logger
+                );
+                if (liteRes && liteRes.length > 0) {
+                  effectiveResult = liteRes;
+                }
+              } catch {
+                // Ignore fallback error
+              }
+            }
+
+            if (effectiveResult === null || effectiveResult.length === 0) {
+              if (effectiveResult === null) this.circuit.recordFailure(engine.name);
             } else {
-              container.add(engine.name, result);
+              container.add(engine.name, effectiveResult);
               this.circuit.recordSuccess(engine.name);
               successfulEngines++;
               checkEarlyReturn();
@@ -387,6 +410,7 @@ export class EnhancedSearch {
     m.set("indiacode",  new IndiaCodeEngine());
     m.set("sebi",       new SebiEngine());
     m.set("indiankanoon", new IndianKanoonEngine());
+    m.set("startpage",  new StartpageEngine());
 
     if (tavilyApiKey)              m.set("tavily",    new TavilyEngine(tavilyApiKey));
     if (braveApiKey)               m.set("brave",     new BraveEngine(braveApiKey));
@@ -404,6 +428,7 @@ export class EnhancedSearch {
       : ["openalex", "indiacode", "sebi"];
     const VARIANT: Record<SourceName, QueryVariant> = {
       duckduckgo:   "primary",
+      startpage:    "primary",
       bing:         "primary",
       mojeek:       "primary",
       googlenews:   "recent",

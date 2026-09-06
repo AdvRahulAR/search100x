@@ -1,5 +1,6 @@
 export { EnhancedSearch, ResultCache, FileResultCache, DOMAIN_PRESETS } from "./search.js";
 export { cacheKey } from "./core/cache.js";
+export { SqliteResultCache } from "./core/sqlite-cache.js";
 export type { IResultCache } from "./core/cache.js";
 export type {
   SearchResult,
@@ -49,6 +50,7 @@ export { GoogleEngine } from "./adapters/google.js";
 // v3.0.0 exports
 export { IndiaCodeEngine, SebiEngine } from "./adapters/indiacode.js";
 export { IndianKanoonEngine } from "./adapters/indiankanoon.js";
+export { StartpageEngine } from "./adapters/startpage.js";
 export { WikipediaFullTextEngine, DuckDuckGoLiteEngine, GoogleNewsIndiaEngine } from "./adapters/enhanced-engines.js";
 export { extractContent, extractPdfText, isPdfContentType } from "./core/extractor.js";
 export { ConnectionPool, globalPool, pMap } from "./core/pool.js";
@@ -101,4 +103,11 @@ export type {
   McpTextContent,
   McpToolCallResult,
 } from "./mcp.js";
+
+// v4.1.0 exports — micro-server, SearXNG drop-in, sandbox isomorphic runtime
+export { createMicroServer, startMicroServer } from "./micro-server.js";
+export type { MicroServerOptions, MicroServerInstance } from "./micro-server.js";
+export { createSandboxSearch, isomorphicSearch, isomorphicRead } from "./sandbox.js";
+export type { SandboxSearchOptions } from "./sandbox.js";
+
 

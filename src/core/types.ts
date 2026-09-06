@@ -59,11 +59,12 @@ export type SourceName =
   | "openmeteo"
   | "indiacode"
   | "sebi"
-  | "indiankanoon";
+  | "indiankanoon"
+  | "startpage";
 
 export const ENGINE_TIERS = {
   tier1: ["searxng", "wikipedia", "bing", "googlenews", "indiankanoon"] as SourceName[],
-  tier2: ["duckduckgo", "mojeek", "brave", "openalex", "indiacode", "sebi"] as SourceName[],
+  tier2: ["duckduckgo", "mojeek", "brave", "openalex", "indiacode", "sebi", "startpage"] as SourceName[],
   tier3: ["marginalia", "yep"] as SourceName[],
 };
 
@@ -106,6 +107,8 @@ export interface LegalMetadata {
 export interface SearXNGConfig {
   /** Base URL of your SearXNG instance, e.g. "https://searx.example.com". Defaults to hardcoded instance. */
   baseUrl?:    string;
+  /** Optional fallback SearXNG instances to query if primary instance fails or returns 0 results */
+  fallbackUrls?: string[];
   /** Bearer token if your instance requires Authorization header */
   token?:     string;
   /** Comma-separated sub-engines to enable, e.g. "google,bing,brave,ddg" — blank = all */
