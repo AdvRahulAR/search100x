@@ -67,8 +67,11 @@ export class CircuitBreakerRegistry {
         MAX_COOLDOWN_MS
       );
       if (Date.now() - b.openedAt >= cooldown) {
+        // Transition and claim the single trial slot in one step, so a
+        // concurrent caller sees HALF_OPEN + active trial and is skipped.
         b.state = "HALF_OPEN";
-        b.halfOpenTrialActive = false;
+        b.halfOpenTrialActive = true;
+        b.halfOpenTrialStartedAt = Date.now();
         return false;
       }
       return true;

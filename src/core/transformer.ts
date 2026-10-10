@@ -346,8 +346,10 @@ export interface QueryBundle {
   primary: string;
   /** Same as primary — kept for engines that previously used "recent" */
   recent: string;
-  /** site:-restricted to caller-specified domains; equals primary if none given */
+  /** site:-restricted to the first chunk of caller-specified domains; equals primary if none given */
   scoped: string;
+  /** One site:-restricted query per chunk of up to 6 domains (covers every scoped domain, max 5 chunks). */
+  scopedChunks: string[];
   /** Resolved time range, passed per-engine to their native freshness params */
   timeRange?: TimeRange;
   /** 1-indexed result page */
@@ -419,17 +421,24 @@ export function buildQueryBundle(
 ): QueryBundle {
   const base = query.trim();
 
-  let scoped = base;
+  const scopedChunks: string[] = [];
   if (scopedDomains && scopedDomains.length > 0) {
-    const topDomains = scopedDomains.slice(0, 6);
-    const siteClause = topDomains.map((d) => `site:${d}`).join(" OR ");
-    scoped = `(${siteClause}) ${base}`;
+    // De-dupe and strip schemes/paths ("site:" takes a host).
+    const hosts = [...new Set(scopedDomains
+      .map((d) => d.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0])
+      .filter(Boolean))];
+    for (let i = 0; i < hosts.length && scopedChunks.length < 5; i += 6) {
+      const siteClause = hosts.slice(i, i + 6).map((d) => `site:${d}`).join(" OR ");
+      scopedChunks.push(`(${siteClause}) ${base}`);
+    }
   }
+  const scoped = scopedChunks[0] ?? base;
 
   return {
     primary: expandQuery(base),
     recent: base,   // no longer injects years — engines use timeRange instead
     scoped,
+    scopedChunks,
     timeRange,
     page,
   };

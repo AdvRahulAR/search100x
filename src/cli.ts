@@ -18,6 +18,24 @@ import { EnhancedSearch, DOMAIN_PRESETS, DOMAIN_CATEGORIES, resolvePresetDomains
 import { SourceName } from "./core/types.js";
 import { startMcpServer } from "./mcp.js";
 import { startMicroServer } from "./micro-server.js";
+import { configureProxy } from "./core/proxy.js";
+
+// Global proxy flags (apply to search, serve and --mcp). Removed from argv so
+// the rest of the parser never sees them.
+{
+  const argv = process.argv;
+  for (let i = 2; i < argv.length; i++) {
+    if (argv[i] === "--proxy" && argv[i + 1]) {
+      configureProxy({ url: argv[i + 1] });
+      argv.splice(i, 2);
+      i--;
+    } else if (argv[i] === "--no-proxy") {
+      configureProxy({ url: false });
+      argv.splice(i, 1);
+      i--;
+    }
+  }
+}
 
 interface CliArgs {
   query:         string;
@@ -46,12 +64,12 @@ search100x — multi-source web search for LLM grounding
 
 Usage:
   search100x "<query>" [options]
-  search100x serve [--port 3000] [--host 0.0.0.0]
+  search100x serve [--port 3000] [--host 127.0.0.1]
   search100x --mcp
 
 Options:
   --port <n>           Port for HTTP micro-server (default: 3000)
-  --host <ip>          Host interface for micro-server (default: 0.0.0.0)
+  --host <ip>          Host interface for micro-server (default: 127.0.0.1)
   --limit <n>          Max results (default: 10)
   --sources <a,b,...>  Comma-separated engine names
   --preset <name>      Domain preset or category:
@@ -66,6 +84,9 @@ Options:
   --enrich <n>         Fetch full page content for top-N results (default: 0)
   --browser            Enable silent browser automation fallback for JavaScript/bot-protected pages
   --cdp <url>          Connect to existing Chrome DevTools Protocol URL (e.g. http://127.0.0.1:9222)
+  --proxy <url>        HTTP(S) proxy for all requests, e.g. http://user:pass@proxy.corp:8080
+                       (default: HTTPS_PROXY / HTTP_PROXY env; NO_PROXY honoured)
+  --no-proxy           Ignore proxy environment variables
   --min-engines <n>    Minimum successful engines needed for early-return (default: 3)
   --max-wait <ms>      Maximum wait time in ms before early-return (default: 4000)
   --deep               Deep search mode (queries all engines, waits for thorough results)
@@ -234,7 +255,7 @@ if (process.argv.includes("--mcp")) {
   startMcpServer();
 } else if (process.argv[2] === "serve" || process.argv.includes("--serve")) {
   let port = Number(process.env.PORT ?? 3000);
-  let host = process.env.HOST ?? "0.0.0.0";
+  let host = process.env.HOST ?? "127.0.0.1";
   for (let i = 2; i < process.argv.length; i++) {
     if (process.argv[i] === "--port" && process.argv[i + 1]) {
       port = Number(process.argv[++i]);

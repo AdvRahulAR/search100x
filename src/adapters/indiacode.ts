@@ -40,8 +40,9 @@ export class IndiaCodeEngine implements Engine {
 
       if (typeof res.data !== "string") return [];
       return this.parseSearchResults(res.data, query);
-    } catch {
-      return [];
+    } catch (err) {
+      // Surface failures to the circuit breaker and SearchResponse.engines.
+      throw err;
     }
   }
 
@@ -94,8 +95,9 @@ export class SebiEngine implements Engine {
 
       if (typeof res.data !== "string") return [];
       return this.parseResults(res.data);
-    } catch {
-      return [];
+    } catch (err) {
+      // Surface failures to the circuit breaker and SearchResponse.engines.
+      throw err;
     }
   }
 

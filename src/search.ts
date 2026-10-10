@@ -1,5 +1,5 @@
 import {
-  SearchConfig, SearchOptions, SearchResponse, SearchResult, SourceName, Logger,
+  SearchConfig, SearchOptions, SearchResponse, SearchResult, SourceName, Logger, EngineStatus,
 } from "./core/types.js";
 import { Engine, ENGINE_TIMEOUTS } from "./core/engine.js";
 import { ResultContainer } from "./core/container.js";
@@ -25,7 +25,8 @@ import { OpenAlexEngine }   from "./adapters/openalex.js";
 import { BraveEngine, BraveFreeEngine } from "./adapters/brave.js";
 import { TavilyEngine }     from "./adapters/tavily.js";
 import { GoogleEngine }     from "./adapters/google.js";
-import { SearXNGEngine }    from "./adapters/searxng.js";
+import { SearXNGEngine, resolveSearXNGConfig } from "./adapters/searxng.js";
+import { configureProxy } from "./core/proxy.js";
 import { MarginaliaEngine } from "./adapters/marginalia.js";
 import { YepEngine }        from "./adapters/yep.js";
 import { OpenMeteoEngine }  from "./adapters/openmeteo.js";
@@ -49,18 +50,77 @@ type QueryVariant = keyof Pick<QueryBundle, "primary" | "recent" | "scoped">;
 interface EngineEntry {
   engine:  Engine;
   variant: QueryVariant;
+  /** For scoped entries: which site:-clause chunk of the scoped domains to use. */
+  scopeChunk?: number;
 }
 
-function withDeadline<T>(promise: Promise<T>, remainingMs: number, label: string, logger?: Logger): Promise<T | null> {
+function entryQuery(bundle: QueryBundle, entry: EngineEntry): string {
+  if (entry.scopeChunk !== undefined && bundle.scopedChunks.length > 0) {
+    return bundle.scopedChunks[entry.scopeChunk % bundle.scopedChunks.length];
+  }
+  return bundle[entry.variant];
+}
+
+/** Call an engine so that synchronous throws become rejections (never unhandled). */
+function invoke<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return Promise.resolve(fn());
+  } catch (err) {
+    return Promise.reject(err);
+  }
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function withDeadline<T>(
+  promise: Promise<T>,
+  remainingMs: number,
+  label: string,
+  logger?: Logger,
+  onError?: (message: string) => void
+): Promise<T | null> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       logger?.warn(`[search100x] ${label} timed out after ${Math.round(remainingMs)}ms`);
+      onError?.(`timed out after ${Math.round(remainingMs)}ms`);
       resolve(null);
     }, remainingMs);
     promise.then((v) => { clearTimeout(timer); resolve(v); })
-           .catch(() => { clearTimeout(timer); resolve(null); });
+           .catch((err) => {
+             clearTimeout(timer);
+             onError?.(errorMessage(err));
+             resolve(null);
+           });
   });
 }
+
+/** True when `url`'s host equals or is a subdomain of one of `domains` (paths in domains are ignored). */
+export function urlInScope(url: string, domains: string[]): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+  } catch {
+    return false;
+  }
+  return domains.some((raw) => {
+    const d = raw.toLowerCase().replace(/^https?:\/\//, "").split("/")[0].replace(/^www\./, "").replace(/\.$/, "");
+    return d.length > 0 && (host === d || host.endsWith("." + d));
+  });
+}
+
+function validateLimit(limit: unknown): number {
+  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error(`search100x: limit must be an integer between 1 and 100, got ${String(limit)}`);
+  }
+  return limit;
+}
+
+/** Max domains per site: clause (engines truncate very long OR chains). */
+const SCOPE_CHUNK_SIZE = 6;
+/** Max number of scoped query chunks (=> up to 30 domains queried). */
+const MAX_SCOPE_CHUNKS = 5;
 
 export class EnhancedSearch {
   private config:     SearchConfig;
@@ -77,6 +137,10 @@ export class EnhancedSearch {
     this.cache    = config.cache ?? new ResultCache();
     this.circuit  = new CircuitBreakerRegistry(this.logger);
     this.engineMap = this.initEngines();
+    if (config.proxy !== undefined || config.noProxy !== undefined) {
+      // Process-wide: every adapter shares one HTTP layer.
+      configureProxy({ url: config.proxy, noProxy: config.noProxy });
+    }
     if (config.customDomainBoosts) {
       setCustomDomainBoosts(config.customDomainBoosts);
     }
@@ -110,9 +174,7 @@ export class EnhancedSearch {
       rerankCandidates = 20,
     } = options;
 
-    if (limit < 1 || limit > 100) {
-      throw new Error(`search100x: limit must be between 1 and 100, got ${limit}`);
-    }
+    validateLimit(limit);
 
     const autoClass  = classifyQuery(query);
     const preset     = scoringPreset
@@ -125,10 +187,26 @@ export class EnhancedSearch {
     const entries      = this.buildEntries(options.sources, scopedDomains, preset);
     const srcKeys      = entries.map((e) => `${e.engine.name}:${e.variant}`);
 
+    // Every option that can change the output is part of the key.
+    const cacheKeyStr = cacheKey(query, srcKeys, {
+      timeRange: resolvedTimeRange,
+      page,
+      preset,
+      limit,
+      scopedDomains,
+      scopeMode: scopedDomains?.length ? (options.scopeMode ?? "strict") : undefined,
+      enrichTopN,
+      enrichContent,
+      rerank,
+      rerankCandidates: rerank ? rerankCandidates : undefined,
+      reformulate: options.reformulate,
+      deep: options.deep,
+      browser: !!(options.browser ?? this.config.browser)?.enabled,
+    });
+
     if (!noCache) {
-      const key    = cacheKey(query + (resolvedTimeRange ?? "") + page + preset, srcKeys);
-      const cached = this.cache.get(key, query, srcKeys);
-      if (cached) return this.toResponse(query, cached.slice(0, limit), Date.now() - (deadline - totalTimeout));
+      const cached = this.cache.get(cacheKeyStr, query, srcKeys);
+      if (cached) return { ...this.toResponse(query, cached.slice(0, limit), Date.now() - (deadline - totalTimeout)), cached: true };
     }
 
     const bundle    = buildQueryBundle(query, scopedDomains, resolvedTimeRange, page);
@@ -147,7 +225,7 @@ export class EnhancedSearch {
       const weatherEngine = new OpenMeteoEngine();
       const weatherTimeout = ENGINE_TIMEOUTS["openmeteo"] ?? 6_000;
       const weatherResult = await withDeadline(
-        weatherEngine.search(query, weatherTimeout),
+        invoke(() => weatherEngine.search(query, weatherTimeout)),
         weatherTimeout,
         "openmeteo",
         this.logger
@@ -175,6 +253,7 @@ export class EnhancedSearch {
 
     let successfulEngines = 0;
     let settled = false;
+    const engineStatus: Record<string, EngineStatus> = {};
 
     const executeEngines = async (): Promise<void> => {
       return new Promise<void>((resolve) => {
@@ -203,63 +282,66 @@ export class EnhancedSearch {
           return;
         }
 
-        activeEntries.forEach(({ engine, variant }) => {
+        activeEntries.forEach((entry) => {
+          const { engine } = entry;
+          const statusKey = entry.scopeChunk !== undefined ? `${engine.name}:scoped${entry.scopeChunk}` : engine.name;
           (async () => {
-            if (this.circuit.isOpen(engine.name)) {
-              this.logger.warn(`[circuit] skipping ${engine.name} (OPEN)`);
+            const started = Date.now();
+            const engineErrors: string[] = [];
+            try {
+              if (this.circuit.isOpen(engine.name)) {
+                this.logger.warn(`[circuit] skipping ${engine.name} (OPEN)`);
+                engineStatus[statusKey] = { ok: false, ms: 0, count: 0, skipped: "circuit-open" };
+                return;
+              }
+
+              const engineTimeout = ENGINE_TIMEOUTS[engine.name] ?? totalTimeout;
+              const remaining = Math.max(1_000, Math.min(engineTimeout, deadline - Date.now()));
+              const result = await withDeadline(
+                invoke(() => engine.search(entryQuery(bundle, entry), remaining, bundle.timeRange, bundle.page)),
+                remaining,
+                engine.name,
+                this.logger,
+                (msg) => { engineErrors.push(msg); }
+              );
+
+              let effectiveResult = result;
+              // If duckduckgo fails or returns 0 (CAPTCHA/bot-block), fall back to DuckDuckGo Lite.
+              if ((effectiveResult === null || effectiveResult.length === 0) && engine.name === "duckduckgo") {
+                const fallbackTimeout = Math.min(3000, Math.max(1000, deadline - Date.now()));
+                const liteRes = await withDeadline(
+                  invoke(() => new DuckDuckGoLiteEngine().search(entryQuery(bundle, entry), fallbackTimeout)),
+                  fallbackTimeout,
+                  "duckduckgo-lite",
+                  this.logger
+                );
+                if (liteRes && liteRes.length > 0) effectiveResult = liteRes;
+              }
+
+              if (effectiveResult === null) {
+                this.circuit.recordFailure(engine.name);
+              } else if (effectiveResult.length > 0) {
+                container.add(engine.name, effectiveResult);
+                this.circuit.recordSuccess(engine.name);
+                successfulEngines++;
+              }
+              engineStatus[statusKey] = {
+                ok:    effectiveResult !== null,
+                ms:    Date.now() - started,
+                count: effectiveResult?.length ?? 0,
+                ...(effectiveResult === null && engineErrors.length > 0 ? { error: engineErrors[0] } : {}),
+              };
+              checkEarlyReturn();
+            } catch (err) {
+              // Defensive: nothing above should throw, but never leave `pending` stuck.
+              engineStatus[statusKey] = { ok: false, ms: Date.now() - started, count: 0, error: errorMessage(err) };
+            } finally {
               pending--;
               if (pending === 0 && !settled) {
                 clearTimeout(timeoutTimer);
                 settled = true;
                 resolve();
               }
-              return;
-            }
-
-            const engineTimeout = ENGINE_TIMEOUTS[engine.name] ?? totalTimeout;
-            const remaining = Math.max(1_000, Math.min(engineTimeout, deadline - Date.now()));
-            const result = await withDeadline(
-              engine.search(bundle[variant], remaining, bundle.timeRange, bundle.page),
-              remaining,
-              engine.name,
-              this.logger
-            );
-
-            let effectiveResult = result;
-            // Dynamic Failover (inspired by llm4free):
-            // If duckduckgo fails or returns 0 (e.g. CAPTCHA/bot-block), auto-fallback to DuckDuckGoLite
-            if ((effectiveResult === null || effectiveResult.length === 0) && engine.name === "duckduckgo") {
-              try {
-                const fallbackTimeout = Math.min(3000, Math.max(1000, deadline - Date.now()));
-                const ddgLite = new DuckDuckGoLiteEngine();
-                const liteRes = await withDeadline(
-                  ddgLite.search(bundle[variant], fallbackTimeout),
-                  fallbackTimeout,
-                  "duckduckgo-lite",
-                  this.logger
-                );
-                if (liteRes && liteRes.length > 0) {
-                  effectiveResult = liteRes;
-                }
-              } catch {
-                // Ignore fallback error
-              }
-            }
-
-            if (effectiveResult === null || effectiveResult.length === 0) {
-              if (effectiveResult === null) this.circuit.recordFailure(engine.name);
-            } else {
-              container.add(engine.name, effectiveResult);
-              this.circuit.recordSuccess(engine.name);
-              successfulEngines++;
-              checkEarlyReturn();
-            }
-
-            pending--;
-            if (pending === 0 && !settled) {
-              clearTimeout(timeoutTimer);
-              settled = true;
-              resolve();
             }
           })();
         });
@@ -284,7 +366,7 @@ export class EnhancedSearch {
             const engineTimeout = ENGINE_TIMEOUTS[engine.name] ?? totalTimeout;
             const remaining     = Math.max(1_000, Math.min(engineTimeout, deadline - Date.now()));
             const result        = await withDeadline(
-              engine.search(eqBundle[variant], remaining, eqBundle.timeRange, eqBundle.page),
+              invoke(() => engine.search(eqBundle[variant], remaining, eqBundle.timeRange, eqBundle.page)),
               remaining,
               `${engine.name}:${eq}`,
               this.logger
@@ -302,7 +384,13 @@ export class EnhancedSearch {
     }
 
     const fetchLimit = rerank ? Math.max(limit, rerankCandidates) : limit;
-    let results = container.getResults(fetchLimit, weights, halfLife);
+    const strictScope = !!scopedDomains?.length && (options.scopeMode ?? "strict") === "strict";
+    let results = strictScope
+      // Rank a wider pool, then keep only in-scope results.
+      ? container.getResults(100, weights, halfLife)
+          .filter((r) => urlInScope(r.url, scopedDomains!))
+          .slice(0, fetchLimit)
+      : container.getResults(fetchLimit, weights, halfLife);
 
     if (pinnedResult) {
       results = [pinnedResult, ...results.filter(r => r.url !== pinnedResult!.url)];
@@ -329,11 +417,10 @@ export class EnhancedSearch {
     results = results.slice(0, limit);
 
     if (!noCache) {
-      const key = cacheKey(query + (resolvedTimeRange ?? "") + page + preset, srcKeys);
-      this.cache.set(key, results, query, srcKeys);
+      this.cache.set(cacheKeyStr, results, query, srcKeys);
     }
 
-    return this.toResponse(query, results, Date.now() - (deadline - totalTimeout));
+    return { ...this.toResponse(query, results, Date.now() - (deadline - totalTimeout)), engines: engineStatus };
   }
 
   async *searchStream(
@@ -341,9 +428,7 @@ export class EnhancedSearch {
     options: SearchOptions = {}
   ): AsyncGenerator<SearchResult[]> {
     const { limit = DEFAULT_LIMIT, scopedDomains, timeRange, page = 1 } = options;
-    if (limit < 1 || limit > 100) {
-      throw new Error(`search100x: limit must be between 1 and 100, got ${limit}`);
-    }
+    validateLimit(limit);
     const totalTimeout = this.config.timeoutMs ?? DEFAULT_TIMEOUT;
     const deadline     = Date.now() + totalTimeout;
     const bundle       = buildQueryBundle(query, scopedDomains, timeRange, page);
@@ -355,7 +440,7 @@ export class EnhancedSearch {
         if (!this.circuit.isOpen(engine.name)) {
           const remaining = Math.max(1_000, deadline - Date.now());
           const result    = await withDeadline(
-            engine.search(bundle[variant], remaining, bundle.timeRange, bundle.page),
+            invoke(() => engine.search(bundle[variant], remaining, bundle.timeRange, bundle.page)),
             remaining,
             engine.name,
             this.logger
@@ -424,7 +509,9 @@ export class EnhancedSearch {
     if (braveApiKey)               m.set("brave",     new BraveEngine(braveApiKey));
     else                           m.set("brave",     new BraveFreeEngine());
     if (googleApiKey && googleCx)  m.set("google",    new GoogleEngine(googleApiKey, googleCx));
-    m.set("searxng", new SearXNGEngine(this.config.searxng ?? {}));
+    // SearXNG is opt-in: only registered when a baseUrl is configured (or SEARXNG_URL is set).
+    const searxngCfg = resolveSearXNGConfig(this.config.searxng ?? {});
+    if (searxngCfg) m.set("searxng", new SearXNGEngine(searxngCfg));
 
     return m;
   }
@@ -482,10 +569,22 @@ export class EnhancedSearch {
 
     const scopedEntries: EngineEntry[] = [];
     if (scopedDomains && scopedDomains.length > 0 && !requested) {
-      const freeWeb: SourceName[] = ["duckduckgo", "bing", "mojeek", "brave"];
-      for (const entry of base) {
-        if (freeWeb.includes(entry.engine.name as SourceName)) {
-          scopedEntries.push({ engine: entry.engine, variant: "scoped" });
+      const freeWeb = ["duckduckgo", "bing", "mojeek", "brave"];
+      const scopedEngines = base.filter((e) => freeWeb.includes(e.engine.name));
+      const nHosts = new Set(scopedDomains.map((d) => d.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0]).filter(Boolean)).size;
+      const nChunks = Math.min(MAX_SCOPE_CHUNKS, Math.max(1, Math.ceil(nHosts / SCOPE_CHUNK_SIZE)));
+      if (scopedEngines.length > 0) {
+        if (nChunks === 1) {
+          for (const e of scopedEngines) scopedEntries.push({ engine: e.engine, variant: "scoped", scopeChunk: 0 });
+        } else {
+          // Spread chunks over engines: every chunk gets two engines (or all, if fewer).
+          const perChunk = Math.min(2, scopedEngines.length);
+          for (let c = 0; c < nChunks; c++) {
+            for (let k = 0; k < perChunk; k++) {
+              const e = scopedEngines[(c + k) % scopedEngines.length];
+              scopedEntries.push({ engine: e.engine, variant: "scoped", scopeChunk: c });
+            }
+          }
         }
       }
     }

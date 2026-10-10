@@ -21,6 +21,8 @@
 
 import { parse } from "node-html-parser";
 import { http } from "./http.js";
+import { safeFetch } from "./safe-fetch.js";
+import { isSsrfSafe } from "./security.js";
 import { bm25Scores, legalCitations } from "./bm25.js";
 import { extractContent } from "./extractor.js";
 import { SearchResult, ResultType } from "./types.js";
@@ -91,39 +93,41 @@ function jurisdictionBoost(url: string, isLegalQuery: boolean): number {
 // Google News RSS URLs (news.google.com/rss/articles/...) are redirect-encoded.
 // Follow the redirect to get the real publisher URL, then fetch that.
 
-const GOOGLE_NEWS_PATTERN = /news\.google\.com\/rss\/articles\//;
+/** True only when the URL's *host* is news.google.com and the path is an RSS article. */
+export function isGoogleNewsArticleUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (u.protocol === "https:" || u.protocol === "http:")
+      && u.hostname.toLowerCase().replace(/\.$/, "") === "news.google.com"
+      && u.pathname.startsWith("/rss/articles/");
+  } catch {
+    return false;
+  }
+}
 
 async function resolveGoogleNewsUrl(googleNewsUrl: string, timeoutMs: number): Promise<string | undefined> {
+  if (!isGoogleNewsArticleUrl(googleNewsUrl)) return undefined;
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    const res = await fetch(googleNewsUrl, {
+    // First hop only — read the Location header without following it.
+    const res = await safeFetch(googleNewsUrl, {
       headers: getStealthHeaders(),
-      signal: ctrl.signal,
-      redirect: "manual",
+      timeoutMs,
+      maxRedirects: 0,
+      maxBytes: 256 * 1024,
     });
-    clearTimeout(timer);
-
-    if ([301, 302, 303, 307, 308].includes(res.status)) {
-      const location = res.headers.get("location");
-      if (location && location.length > 0) return location;
+    const location = res.headers.location;
+    if (res.status >= 300 && res.status < 400 && typeof location === "string" && location.length > 0) {
+      return new URL(location, googleNewsUrl).toString();
     }
 
-    // If no redirect captured, try following it fully and use the final URL
-    const ctrl2 = new AbortController();
-    const timer2 = setTimeout(() => ctrl2.abort(), timeoutMs);
-    const res2 = await fetch(googleNewsUrl, {
+    // Otherwise follow redirects (each hop SSRF-checked) and use the final URL.
+    const res2 = await safeFetch(googleNewsUrl, {
       headers: getStealthHeaders(),
-      signal: ctrl2.signal,
-      redirect: "follow",
+      timeoutMs,
+      maxBytes: 512 * 1024,
     });
-    clearTimeout(timer2);
-
-    if (res2.ok) {
-      const text = await res2.text();
-      if (!isBotChallenge(text)) {
-        return res2.url;
-      }
+    if (res2.ok && !isBotChallenge(res2.text())) {
+      return res2.url;
     }
     return undefined;
   } catch {
@@ -139,11 +143,14 @@ async function fetchCleanText(
   browser?: BrowserOptions
 ): Promise<string | undefined> {
   try {
+    // Every fetch below goes through SSRF checks; reject obviously bad URLs early.
+    if (!isSsrfSafe(url).allowed) return undefined;
+
     // Resolve Google News redirect URLs to real publisher URLs
-    if (GOOGLE_NEWS_PATTERN.test(url)) {
+    if (isGoogleNewsArticleUrl(url)) {
       const realUrl = await resolveGoogleNewsUrl(url, timeoutMs);
       if (!realUrl) return undefined;
-      if (!GOOGLE_NEWS_PATTERN.test(realUrl)) {
+      if (!isGoogleNewsArticleUrl(realUrl)) {
         return await fetchCleanText(realUrl, timeoutMs, browser);
       }
       return undefined;
@@ -156,6 +163,7 @@ async function fetchCleanText(
         timeout: timeoutMs,
         headers: getStealthHeaders(),
         responseType: "text",
+        maxBytes: MAX_CONTENT_LENGTH,
       });
 
       if (typeof res.data === "string") {
@@ -353,8 +361,11 @@ export async function fetchRelevantContent(
   let wins = passages(text, WINDOW, WINDOW - STEP);
   if (wins.length === 0) return undefined;
   if (wins.length > MAX_WINDOWS) {
-    const step = Math.floor(wins.length / MAX_WINDOWS);
-    wins = wins.filter((_, i) => i % step === 0).slice(0, MAX_WINDOWS);
+    // Evenly spaced sample across the WHOLE document (the old modulo step
+    // collapsed to 1 for 41–79 windows and dropped the second half).
+    const total = wins.length;
+    const all = wins;
+    wins = Array.from({ length: MAX_WINDOWS }, (_, k) => all[Math.floor((k * total) / MAX_WINDOWS)]);
   }
 
   const scores = bm25Scores(query, wins);

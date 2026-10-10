@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0] - 2026-10-10
+
+### Security
+- **SearXNG is now opt-in.** Removed the hard-coded default instance (`searxng.replit.app`) and its bearer token. Queries are never sent to a third-party SearXNG instance unless `searxng.baseUrl` or `SEARXNG_URL` is configured. The token is only sent to the configured primary host. Public fallback instances are no longer used by default. **The previously published token must be rotated.**
+- **SSRF hardening.** New `safeFetch()` (node:http/https) validates the *resolved* IP of every connection (closes DNS-rebinding and `*.nip.io` tricks), re-checks every redirect hop, and caps response bodies after decompression. `isSsrfSafe()` now blocks `localhost.`, IPv4-mapped/NAT64/6to4 IPv6, `::`, `*.localhost`, `*.internal`, cloud metadata hostnames and single-label names. Fixed a bypass where any URL containing `news.google.com/rss/articles/` (e.g. in a query string) was fetched without any check. The headless-browser fallback now applies the same policy.
+- **Micro-server:** binds to `127.0.0.1` by default; optional API key (`SEARCH100X_API_KEY`); per-IP rate limit (default 60/min); `browser=true` requests are refused unless `SEARCH100X_ALLOW_BROWSER=1`; numeric params are validated and clamped.
+- Retry-After waits capped at 5 s; MCP `enrichContent` capped at 10.
+- Removed unused `express` and `unpdf@0.12` optional dependencies (the latter pulled in a critical `tar` advisory). `unpdf` and `onnxruntime-node` are now optional peer dependencies. Production `npm audit`: 0 vulnerabilities.
+
+### Fixed
+- **Cache returned results for different requests.** Keys now cover the canonical query plus every output-affecting option (page, time range, preset, limit, scoped domains, enrichment, rerank…). Removed the SimHash fuzzy fallback, which merged e.g. "rbi repo rate" and "rbi repo rate 2024", and treated all non-Latin queries as identical. The in-memory and file caches are bounded (LRU, default 500). File cache writes are atomic and revive dates.
+- **`scopedDomains` now actually restricts results** (`scopeMode: "strict"` default; `"boost"` keeps the old behaviour). All domains are queried (in `site:` chunks of 6, up to 30), not only the first 6.
+- Near-duplicate removal no longer collapses distinct short URLs on the same host (e.g. every `indiankanoon.org/doc/N/`).
+- Consensus bonus counts distinct engines (an engine's primary + scoped variants no longer count as agreement).
+- A plugin engine that throws synchronously no longer causes an unhandled rejection or stalls the search until timeout.
+- `limit` must be an integer 1–100 (`"abc"`/`NaN`/`5.5` previously slipped through).
+- Snippet BM25 now uses the same tokenizer as the query (stemming, compounds, Unicode), so the BM25 component is no longer ~0.
+- Passage windows are sampled evenly across long documents (41–79 windows previously dropped the second half).
+- Circuit breaker: OPEN → HALF_OPEN now admits exactly one trial; SearXNG failures now reach the breaker.
+- `contentSimhash` overflow past 127 tokens; unbounded per-query browser-profile map.
+- Reranker model path works on Windows/paths with spaces; `SEARCH100X_MODELS_DIR` override; `scripts/download-reranker.mjs` is now shipped.
+
+### Added
+- **Proxy support.** `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` / `NO_PROXY` are honoured for every outbound request: CONNECT tunnels for https targets, absolute-form for http, Basic proxy auth, and https:// proxies. Configure with `new EnhancedSearch({ proxy, noProxy })`, `configureProxy()`, or the `--proxy` / `--no-proxy` CLI flags. The headless browser gets `--proxy-server`. SSRF rules still apply: there's a local pre-resolution check when proxied.
+- `SearchResponse.engines` — per-engine `{ ok, ms, count, error?, skipped? }`; `SearchResponse.cached`.
+- `citationSources()` maps Claude's `document_index` to URLs; `buildCitedQuery()` accepts `maxTokens` and adds an untrusted-content `system` prompt. Content markers are no longer injected into citable text when citations are enabled.
+- Exports: `safeFetch`, `SsrfError`, `isPrivateAddress`, `assertResolvesPublic`, `urlInScope`, `Engine` and `EngineStatus` types.
+- `engines: { node: ">=18" }`; `types` listed first in `exports`.
+
+- Adapters (arXiv, GitHub, HackerNews, Indian Kanoon, Startpage, IndiaCode, SEBI) no longer turn network errors into empty results. Failures now reach the circuit breaker and `SearchResponse.engines`.
+- A late `ECONNRESET` on a finished socket can no longer crash the process (unhandled `'error'` event).
+
+### Changed (breaking)
+- SearXNG disabled unless configured; strict scoping by default; micro-server local-only by default. These may warrant a major version bump.
+
 ## [4.3.0] - 2026-09-06
 
 ### Added

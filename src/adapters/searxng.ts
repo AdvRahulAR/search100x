@@ -10,30 +10,33 @@ import { http } from "../core/http.js";
  * an `engines` array listing which sub-engines returned it — the container
  * uses this for sub-engine consensus weighting on top of the standard RRF.
  *
- * A default instance is hardcoded so the package works out of the box.
- * Override by passing your own `searxng` config to EnhancedSearch.
+ * SearXNG is OPT-IN: it is only enabled when you pass `searxng.baseUrl`
+ * or set the SEARXNG_URL environment variable. No queries are ever sent to a
+ * third-party instance unless you configure one.
  *
  * Usage:
- *   // Default — uses hardcoded instance
- *   const s = new EnhancedSearch();
- *
- *   // Custom instance
  *   const s = new EnhancedSearch({
  *     searxng: { baseUrl: "https://my-searxng.fly.dev", engines: "google,bing,brave,ddg" }
  *   });
  */
 
-/** Default SearXNG instance — hardcoded for zero-config usage. */
-const DEFAULT_SEARXNG_BASE_URL = "https://searxng.replit.app";
-const DEFAULT_SEARXNG_TOKEN   = "40b5ea00de6d9c6bac9e3844ad1832d6b1a295464cee1c9b148a74fb6626cc63";
 /** Default safe sub-engines that don't hit datacenter CAPTCHAs */
 const DEFAULT_SEARXNG_ENGINES = "bing,wikipedia";
 
-/** Known reliable public SearXNG fallback instances */
-const DEFAULT_FALLBACK_URLS = [
-  "https://search.mectov.my.id",
-  "https://sx.xo.st",
-];
+/** Resolve a SearXNG config from explicit config + env. Returns null when not configured. */
+export function resolveSearXNGConfig(cfg: SearXNGConfig = {}): SearXNGConfig | null {
+  const fromEnv = !cfg.baseUrl && !!process.env.SEARXNG_URL;
+  const baseUrl = cfg.baseUrl ?? process.env.SEARXNG_URL;
+  if (!baseUrl) return null;
+  return {
+    ...cfg,
+    baseUrl,
+    // Only pick up the env token when the URL also came from env, so a token
+    // is never sent to a host it was not configured for.
+    token:   cfg.token ?? (fromEnv ? process.env.SEARXNG_TOKEN : undefined),
+    engines: cfg.engines ?? process.env.SEARXNG_ENGINES ?? DEFAULT_SEARXNG_ENGINES,
+  };
+}
 
 interface SearXNGResultItem {
   title?: string;
@@ -47,29 +50,40 @@ interface SearXNGResultItem {
 export class SearXNGEngine implements Engine {
   readonly name = "searxng" as const;
 
-  constructor(private cfg: SearXNGConfig = {}) {
-    // Fall back to env vars or hardcoded defaults if not explicitly provided
-    this.cfg.baseUrl = this.cfg.baseUrl ?? process.env.SEARXNG_URL ?? DEFAULT_SEARXNG_BASE_URL;
-    this.cfg.token  = this.cfg.token  ?? process.env.SEARXNG_TOKEN ?? DEFAULT_SEARXNG_TOKEN;
-    this.cfg.engines = this.cfg.engines ?? process.env.SEARXNG_ENGINES ?? DEFAULT_SEARXNG_ENGINES;
+  private cfg: SearXNGConfig;
+
+  constructor(cfg: SearXNGConfig = {}) {
+    const resolved = resolveSearXNGConfig(cfg);
+    if (!resolved) {
+      throw new Error("search100x: SearXNGEngine requires searxng.baseUrl (or SEARXNG_URL env)");
+    }
+    // Copy — never mutate the caller's config object.
+    this.cfg = resolved;
   }
 
   async search(query: string, timeoutMs = 7_000, timeRange?: string): Promise<RawResult[]> {
     const urlsToTry = [
       this.cfg.baseUrl!,
-      ...(this.cfg.fallbackUrls ?? DEFAULT_FALLBACK_URLS),
+      ...(this.cfg.fallbackUrls ?? []),
     ];
 
     const perInstanceTimeout = Math.max(1500, Math.floor(timeoutMs / urlsToTry.length));
 
+    let lastError: unknown;
+    let anySucceeded = false;
     for (const baseUrl of urlsToTry) {
+      // The bearer token is only ever sent to the primary configured host.
       const isPrimary = baseUrl === this.cfg.baseUrl;
-      const results = await this.queryInstance(baseUrl, query, perInstanceTimeout, timeRange, isPrimary);
-      if (results.length > 0) {
-        return results;
+      try {
+        const results = await this.queryInstance(baseUrl, query, perInstanceTimeout, timeRange, isPrimary);
+        anySucceeded = true;
+        if (results.length > 0) return results;
+      } catch (err) {
+        lastError = err;
       }
     }
-
+    // Surface failures so the circuit breaker and engine status can see them.
+    if (!anySucceeded && lastError) throw lastError;
     return [];
   }
 
@@ -96,11 +110,13 @@ export class SearXNGEngine implements Engine {
       headers["Authorization"] = `Bearer ${this.cfg.token}`;
     }
 
-    try {
-      const res = await http.get(`${cleanBase}/search?${params}`, {
+    const res = await http.get(`${cleanBase}/search?${params}`, {
         timeout:      timeoutMs,
         headers,
         responseType: "json",
+        // The instance URL is explicitly configured by the user, so a
+        // self-hosted instance on localhost / LAN is allowed.
+        allowPrivate: true,
       });
 
       const data = res.data as Record<string, unknown> | undefined;
@@ -125,9 +141,5 @@ export class SearXNGEngine implements Engine {
           publishedAt,
         } satisfies RawResult;
       }).filter((r) => r.url && r.title);
-
-    } catch {
-      return [];
-    }
   }
 }

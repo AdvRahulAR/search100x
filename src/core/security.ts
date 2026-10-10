@@ -11,39 +11,89 @@
  * point to private addresses after following redirects.
  */
 
-// Private/internal IP ranges (CIDR)
-const BLOCKED_IP_PATTERNS: RegExp[] = [
-  // IPv4 private ranges
-  /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
-  /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/,
-  /^192\.168\.\d{1,3}\.\d{1,3}$/,
-  // Loopback
-  /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
-  // Link-local
-  /^169\.254\.\d{1,3}\.\d{1,3}$/,
-  // Reserved
-  /^0\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
-  /^255\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
-  // Carrier-grade NAT
-  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}$/,
-  // IPv6 loopback
-  /^::1$/,
-  // IPv6 link-local
-  /^fe80::/i,
-  // IPv6 unique-local
-  /^f[cd][0-9a-f]{2}:/i,
-  // IPv6 multicast
-  /^ff[0-9a-f]{2}:/i,
+import net from "node:net";
+import dns from "node:dns";
+
+// Private / reserved / non-routable ranges. Checked with net.BlockList so that
+// every textual form of an address (compressed IPv6, mapped IPv4, …) is handled.
+const BLOCKED_V4: Array<[string, number]> = [
+  ["0.0.0.0", 8],        // "this" network
+  ["10.0.0.0", 8],       // private
+  ["100.64.0.0", 10],    // carrier-grade NAT
+  ["127.0.0.0", 8],      // loopback
+  ["169.254.0.0", 16],   // link-local / cloud metadata
+  ["172.16.0.0", 12],    // private
+  ["192.0.0.0", 24],     // IETF protocol assignments
+  ["192.0.2.0", 24],     // TEST-NET-1
+  ["192.168.0.0", 16],   // private
+  ["198.18.0.0", 15],    // benchmarking
+  ["198.51.100.0", 24],  // TEST-NET-2
+  ["203.0.113.0", 24],   // TEST-NET-3
+  ["224.0.0.0", 4],      // multicast
+  ["240.0.0.0", 4],      // reserved + broadcast
+];
+const BLOCKED_V6: Array<[string, number]> = [
+  ["::", 128],           // unspecified
+  ["::1", 128],          // loopback
+  ["fc00::", 7],         // unique-local
+  ["fe80::", 10],        // link-local
+  ["fec0::", 10],        // deprecated site-local
+  ["ff00::", 8],         // multicast
+  ["100::", 64],         // discard-only
+  ["2001:db8::", 32],    // documentation
 ];
 
-// Blocked hostnames
+const blockList = new net.BlockList();
+for (const [a, p] of BLOCKED_V4) blockList.addSubnet(a, p, "ipv4");
+for (const [a, p] of BLOCKED_V6) blockList.addSubnet(a, p, "ipv6");
+
+/** Extract an embedded IPv4 from IPv4-mapped/compatible, NAT64 or 6to4 IPv6 addresses. */
+function embeddedV4(ip6: string): string | null {
+  const lower = ip6.toLowerCase();
+  // Dotted forms: ::ffff:1.2.3.4, ::1.2.3.4, 64:ff9b::1.2.3.4
+  const dotted = lower.match(/(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (dotted && (lower.startsWith("::") || lower.startsWith("64:ff9b:"))) return dotted[1];
+  // Hex forms: ::ffff:7f00:1, 64:ff9b::7f00:1
+  const hex = lower.match(/^(?:::ffff:|::|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hex) {
+    const hi = parseInt(hex[1], 16), lo = parseInt(hex[2], 16);
+    return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+  }
+  // 6to4: 2002:AABB:CCDD::
+  const sixToFour = lower.match(/^2002:([0-9a-f]{1,4}):([0-9a-f]{1,4}):/);
+  if (sixToFour) {
+    const hi = parseInt(sixToFour[1], 16), lo = parseInt(sixToFour[2], 16);
+    return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+  }
+  return null;
+}
+
+/** True when an IP address (v4 or v6, any textual form) is private, loopback, link-local or reserved. */
+export function isPrivateAddress(ip: string): boolean {
+  const addr = ip.replace(/^\[|\]$/g, "").split("%")[0];
+  const family = net.isIP(addr);
+  if (family === 4) return blockList.check(addr, "ipv4");
+  if (family === 6) {
+    const v4 = embeddedV4(addr);
+    if (v4 && net.isIP(v4) === 4 && blockList.check(v4, "ipv4")) return true;
+    return blockList.check(addr, "ipv6");
+  }
+  return false;
+}
+
+// Blocked hostnames (after trailing-dot removal)
 const BLOCKED_HOSTNAMES = new Set([
   "localhost",
   "localhost.localdomain",
   "ip6-localhost",
   "ip6-loopback",
   "broadcasthost",
+  "metadata",
+  "metadata.google.internal",
+  "instance-data",
 ]);
+// Blocked suffixes — internal-only DNS namespaces
+const BLOCKED_SUFFIXES = [".localhost", ".local", ".internal", ".intranet", ".lan", ".home.arpa", ".corp"];
 
 // Blocked URL schemes — only http/https allowed
 const ALLOWED_SCHEMES = new Set(["http:", "https:"]);
@@ -54,49 +104,63 @@ export interface SsrfCheckResult {
 }
 
 /**
- * Validate a URL for SSRF safety.
- * Checks scheme, hostname, and attempts to detect private IP literals.
+ * Synchronous URL-level SSRF check: scheme, credentials, internal hostnames and
+ * IP literals in every encoding. This cannot see what a hostname resolves to —
+ * use `safeFetch()` (which validates resolved IPs at connect time) for requests.
  */
 export function isSsrfSafe(url: string): SsrfCheckResult {
   try {
     const parsed = new URL(url);
 
-    // Check scheme
     if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
       return { allowed: false, reason: `Blocked scheme: ${parsed.protocol}` };
     }
 
-    const hostname = parsed.hostname.toLowerCase();
+    if (parsed.username || parsed.password) {
+      return { allowed: false, reason: "URL with credentials not allowed" };
+    }
 
-    // Check blocked hostnames
-    if (BLOCKED_HOSTNAMES.has(hostname)) {
+    // Strip IPv6 brackets and any trailing dots ("localhost." == "localhost").
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.+$/, "");
+
+    if (!hostname) {
+      return { allowed: false, reason: "Empty hostname" };
+    }
+
+    if (BLOCKED_HOSTNAMES.has(hostname) || BLOCKED_SUFFIXES.some((s) => hostname.endsWith(s))) {
       return { allowed: false, reason: `Blocked hostname: ${hostname}` };
     }
 
-    // Check for IP literals in hostname
-    // Strip IPv6 brackets
-    const ipLiteral = hostname.replace(/^\[|\]$/g, "");
-
-    for (const pattern of BLOCKED_IP_PATTERNS) {
-      if (pattern.test(ipLiteral)) {
-        return { allowed: false, reason: `Blocked IP range: ${ipLiteral}` };
+    // WHATWG URL already normalises decimal/octal/hex IPv4 (e.g. 2130706433 -> 127.0.0.1).
+    if (net.isIP(hostname)) {
+      if (isPrivateAddress(hostname)) {
+        return { allowed: false, reason: `Blocked IP range: ${hostname}` };
       }
-    }
-
-    // Check for decimal/octal IP encoding (e.g. 0x7f.0x0.0x0.0x1)
-    if (/^\d+$/.test(ipLiteral) || /^0x[0-9a-f]+/i.test(ipLiteral)) {
-      return { allowed: false, reason: `Blocked encoded IP: ${ipLiteral}` };
-    }
-
-    // Check for @ sign (userinfo) — could be used to bypass
-    if (parsed.username || parsed.password) {
-      return { allowed: false, reason: "URL with credentials not allowed" };
+    } else if (!hostname.includes(".")) {
+      // Single-label names resolve via local search domains — never public.
+      return { allowed: false, reason: `Blocked single-label hostname: ${hostname}` };
     }
 
     return { allowed: true };
   } catch {
     return { allowed: false, reason: "Invalid URL" };
   }
+}
+
+/**
+ * Resolve a hostname and throw if any address is private. Used where we cannot
+ * pin the connection (e.g. a headless browser). Residual DNS-rebinding risk
+ * remains there; HTTP fetches use safeFetch(), which pins resolved IPs.
+ */
+export async function assertResolvesPublic(hostname: string): Promise<void> {
+  const host = hostname.replace(/^\[|\]$/g, "");
+  if (net.isIP(host)) {
+    if (isPrivateAddress(host)) throw new Error(`SSRF blocked: ${host} is a private address`);
+    return;
+  }
+  const addrs = await dns.promises.lookup(host, { all: true });
+  const bad = addrs.find((a) => isPrivateAddress(a.address));
+  if (bad) throw new Error(`SSRF blocked: ${host} resolves to private address ${bad.address}`);
 }
 
 /**

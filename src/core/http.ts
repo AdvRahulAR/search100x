@@ -6,7 +6,7 @@
  * response types, and query-string params.
  */
 
-import { isSsrfSafe } from "./security.js";
+import { safeFetch } from "./safe-fetch.js";
 
 export interface HttpResponse {
   data: unknown;
@@ -18,6 +18,9 @@ export class HttpError extends Error {
   }
 }
 
+/** Upper bound on any server-requested Retry-After wait. */
+const MAX_RETRY_AFTER_MS = 5_000;
+
 async function request(
   method: "GET" | "POST",
   url: string | URL,
@@ -27,6 +30,10 @@ async function request(
     body?: unknown;
     timeout?: number;
     responseType?: "text" | "json";
+    /** Max decoded response bytes (default 2 MB). */
+    maxBytes?: number;
+    /** Permit private/loopback targets — only for user-configured hosts (e.g. self-hosted SearXNG). */
+    allowPrivate?: boolean;
   } = {}
 ): Promise<{ data: unknown }> {
   const u = new URL(url.toString());
@@ -36,87 +43,64 @@ async function request(
     }
   }
 
-  const ssrfCheck = isSsrfSafe(u.toString());
-  if (!ssrfCheck.allowed) {
-    throw new Error(`SSRF blocked: ${ssrfCheck.reason}`);
+  let finalBody: string | undefined;
+  if (opts.body != null) {
+    if (typeof opts.body === "string") {
+      finalBody = opts.body;
+    } else {
+      const isUrlEncoded = Object.entries(opts.headers ?? {}).some(
+        ([k, v]) => k.toLowerCase() === "content-type" && v.toLowerCase().includes("application/x-www-form-urlencoded")
+      );
+      finalBody = isUrlEncoded
+        ? new URLSearchParams(opts.body as Record<string, string>).toString()
+        : JSON.stringify(opts.body);
+    }
   }
 
-  let attempt = 0;
+  const timeoutMs = opts.timeout ?? 10_000;
+  const deadline = Date.now() + timeoutMs;
   const maxRetries = 2;
   const backoffs = [500, 1500];
 
-  while (true) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), opts.timeout ?? 10_000);
+  for (let attempt = 0; ; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("Request timed out");
 
-    try {
-      let finalBody: BodyInit | undefined;
-      if (opts.body != null) {
-        if (typeof opts.body === "string") {
-          finalBody = opts.body;
-        } else {
-          // Check for x-www-form-urlencoded
-          let isUrlEncoded = false;
-          if (opts.headers) {
-            for (const [k, v] of Object.entries(opts.headers)) {
-              if (k.toLowerCase() === "content-type" && v.toLowerCase().includes("application/x-www-form-urlencoded")) {
-                isUrlEncoded = true;
-                break;
-              }
-            }
-          }
-          if (isUrlEncoded) {
-            finalBody = new URLSearchParams(opts.body as Record<string, string>).toString();
-          } else {
-            finalBody = JSON.stringify(opts.body);
-          }
-        }
+    // safeFetch validates scheme, IP literals, resolved IPs (at connect time)
+    // and every redirect hop; it also caps the body size.
+    const res = await safeFetch(u, {
+      method,
+      headers: opts.headers,
+      body: finalBody,
+      timeoutMs: remaining,
+      maxBytes: opts.maxBytes,
+      allowPrivate: opts.allowPrivate,
+    });
+
+    if (res.redirected && process.env.DEBUG) {
+      const finalHost = new URL(res.url).hostname;
+      if (finalHost !== u.hostname) {
+        console.warn(`[search100x] ${method} ${u.hostname} redirected to ${finalHost} — possible bot detection`);
       }
-
-      const res = await fetch(u.toString(), {
-        method,
-        headers: opts.headers,
-        body: finalBody,
-        signal: ctrl.signal,
-        redirect: "follow",
-      });
-
-      // Detect redirects — useful for debugging CAPTCHA/bot-detection walls
-      // that return 302 redirects instead of blocking outright.
-      if (res.redirected) {
-        // Silently note — log via console.warn so it appears in debug but doesn't break
-        const originalHost = u.hostname;
-        const finalHost = new URL(res.url).hostname;
-        if (originalHost !== finalHost && process.env.DEBUG) {
-          console.warn(`[search100x] ${method} ${originalHost} redirected to ${finalHost} — possible bot detection`);
-        }
-      }
-
-      if (!res.ok) {
-        if ([429, 503, 408].includes(res.status) && attempt < maxRetries) {
-          let waitTime = backoffs[attempt];
-          const retryAfter = res.headers.get("retry-after");
-          if (retryAfter) {
-            const parsed = parseInt(retryAfter, 10);
-            if (!isNaN(parsed)) {
-              waitTime = parsed * 1000;
-            }
-          }
-          await new Promise<void>((resolve) => setTimeout(resolve, waitTime));
-          attempt++;
-          continue; // retry
-        }
-        throw new HttpError(res.status);
-      }
-
-      const data =
-        opts.responseType === "text" ? await res.text() : await res.json();
-      return { data };
-    } catch (e: unknown) {
-      throw e; // We only retry on HTTP status codes as requested
-    } finally {
-      clearTimeout(timer);
     }
+
+    if (!res.ok) {
+      if ([429, 503, 408].includes(res.status) && attempt < maxRetries) {
+        let waitTime = backoffs[attempt];
+        const retryAfter = res.headers["retry-after"];
+        const parsed = typeof retryAfter === "string" ? parseInt(retryAfter, 10) : NaN;
+        if (!isNaN(parsed) && parsed >= 0) waitTime = parsed * 1000;
+        // Never sleep longer than the cap or past the caller's deadline.
+        waitTime = Math.min(waitTime, MAX_RETRY_AFTER_MS, Math.max(0, deadline - Date.now() - 100));
+        if (waitTime <= 0) throw new HttpError(res.status);
+        await new Promise<void>((resolve) => setTimeout(resolve, waitTime));
+        continue;
+      }
+      throw new HttpError(res.status);
+    }
+
+    const data = opts.responseType === "text" ? res.text() : res.json();
+    return { data };
   }
 }
 

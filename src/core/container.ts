@@ -17,12 +17,19 @@ interface Record {
 function urlShingles(url: string, n = 3): Set<string> {
   try {
     const u    = new URL(url);
-    const toks = u.pathname.split(/[-_/]/).filter(t => t.length > 2);
-    const sh   = new Set<string>();
-    for (let i = 0; i <= toks.length - n; i++) {
-      sh.add(toks.slice(i, i + n).join("_"));
+    const host = u.hostname.replace(/^www\./, "").toLowerCase();
+    // Keep every path token (IDs like "1001" matter: /doc/1001 ≠ /doc/1002).
+    const toks = decodeURIComponent(u.pathname).toLowerCase().split(/[-_/.]+/).filter(t => t.length > 0);
+    const sh   = new Set<string>([host]);
+    if (toks.length < n) {
+      // Too short for n-grams: use the whole path so distinct short URLs
+      // on the same host never collapse into one another.
+      sh.add(`${host}|${toks.join("/")}|${u.search}`);
+    } else {
+      for (let i = 0; i <= toks.length - n; i++) {
+        sh.add(`${host}|${toks.slice(i, i + n).join("_")}`);
+      }
     }
-    sh.add(u.hostname.replace(/^www\./, ""));
     return sh;
   } catch {
     return new Set([url]);
@@ -193,7 +200,10 @@ export class ResultContainer {
         engines.add(a.engine);
       }
       const base         = rrfScore(r.appearances, K_val);
-      const engineBonus  = 1 + 0.15 * Math.log(r.appearances.length);
+      // Consensus counts DISTINCT engines — the same engine appearing via
+      // several query variants (primary + scoped) is not independent agreement.
+      const distinctEngines = new Set(r.appearances.map((a) => a.engine)).size;
+      const engineBonus  = 1 + 0.15 * Math.log(distinctEngines);
       const subEngCount  = Math.max(1, r.subEngines.length);
       const subEngBonus  = subEngCount > 1 ? 1 + 0.12 * Math.log(subEngCount) : 1;
       return base * engineBonus * subEngBonus;

@@ -39,7 +39,7 @@ export function contentSimhash(text: string): bigint {
   const tokens = tokenize3(text);
   if (tokens.length === 0) return 0n;
 
-  const v = new Int8Array(64);
+  const v = new Int32Array(64);
   for (const tok of tokens) {
     const h = fnv1a64(tok);
     for (let i = 0; i < 64; i++) {

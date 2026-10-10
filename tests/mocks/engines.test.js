@@ -1,9 +1,14 @@
-import { afterEach, describe, it } from "node:test";
+import { after, afterEach, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import nock from "nock";
-import { EnhancedSearch } from "../../dist/index.js";
+import { EnhancedSearch, configureProxy } from "../../dist/index.js";
 
 describe("Mocked Engine Tests", () => {
+  // nock intercepts direct requests only; keep a developer's or CI's
+  // HTTPS_PROXY from routing these through a real CONNECT tunnel.
+  before(() => configureProxy({ url: false }));
+  after(() => configureProxy({}));
+
   afterEach(() => {
     nock.cleanAll();
   });

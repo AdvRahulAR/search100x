@@ -31,7 +31,7 @@ Aggregates results from DuckDuckGo, Bing, Mojeek, Google News, Bing News, Wikipe
 - **MCP Server Protocol (Model Context Protocol)** — built-in stdio MCP server (`search100x --mcp`) for Claude Desktop, Cursor, Cline, and AI agents
 - **Zero-Filesystem Sandbox Mode** — isomorphic in-memory runtime (`search100x/sandbox`) for browser workers, Cloudflare Workers, and Deno
 - **RAG Prompt Context Synthesizer** — `toPromptContext()` generates clean, token-budgeted markdown with numbered citations `[1]`, `[2]` for instant LLM prompt injection
-- **SearXNG Auto-Detection** — connects to `SEARXNG_URL` automatically to add ~70 sub-engines
+- **SearXNG integration (opt-in)** — set `searxng.baseUrl` or `SEARXNG_URL` to add your own instance's ~70 sub-engines. No queries are sent to any SearXNG instance unless you configure one
 - **Silent Browser Automation (Zero-Bloat CDP)** — 0MB Chromium download; uses native WebSocket over Chrome DevTools Protocol to bypass Cloudflare/WAF, 403 Forbidden blocks, and JS-heavy pages with explicit user permission
 - **4-factor cascade scoring** — RRF × authority × BM25 × recency, with presets for `tech`, `news`, `legal`, and `academic`
 - **Cross-engine + sub-engine consensus** — results confirmed by multiple engines are boosted logarithmically
@@ -40,7 +40,8 @@ Aggregates results from DuckDuckGo, Bing, Mojeek, Google News, Bing News, Wikipe
 - **Domain presets** — `tech`, `india-legal`, `us-legal`, `uk-legal`, `eu-legal`, `academic`, and more
 - **Streaming** — `searchStream()` async generator yields results as each engine completes
 - **Plugin API** — register custom engines, disable built-ins, inspect circuit breaker state
-- **Tiny install** — lightweight dependencies (`node-html-parser`)
+- **Tiny install** — one runtime dependency (`node-html-parser`); `unpdf` and `onnxruntime-node` are optional peers you install only if you need PDFs or reranking
+- **SSRF-hardened fetching** — page fetches validate the resolved IP on every connection and redirect hop, and cap response size
 
 ---
 
@@ -51,6 +52,10 @@ npm install search100x
 ```
 
 No API keys required for basic usage. Brave and Tavily keys unlock premium results.
+
+Requires Node.js 18+. The package is **ESM-only** — use `import`, or `await import("search100x")` from CommonJS.
+
+> **How results are obtained:** the free engines are queried by fetching their public HTML/RSS pages with browser-like request headers. This can break when a site changes its markup, may be rate-limited or blocked, and may conflict with a site's terms of service. For production use, prefer the official APIs (Brave, Tavily, Google CSE) or your own SearXNG instance.
 
 ---
 
@@ -73,11 +78,11 @@ console.log(res.results);
 ### Anthropic Claude — with Citations API
 
 The `toDocuments()` helper formats results into Claude's native document format.
-Claude returns an answer with inline citations linked back to each source URL.
+Claude's citations reference documents by `document_index`; `citationSources()` maps each index back to its URL.
 
 ```typescript
 import Anthropic from "@anthropic-ai/sdk";
-import { EnhancedSearch, buildCitedQuery, DOMAIN_PRESETS } from "search100x";
+import { EnhancedSearch, buildCitedQuery, citationSources, DOMAIN_PRESETS } from "search100x";
 
 const s = new EnhancedSearch();
 const res = await s.search("Online Safety Act obligations for platforms", {
@@ -92,9 +97,14 @@ const msg = await anthropic.messages.create({
   ...buildCitedQuery(res.results, "What are the key obligations for platforms under the Online Safety Act?"),
 });
 
-// msg.content contains the answer with inline citations
-// Each citation includes the source URL from result.url
-console.log(msg.content);
+// Map citations back to URLs — same filters/order as buildCitedQuery's documents
+const sources = citationSources(res.results);
+for (const block of msg.content) {
+  if (block.type !== "text") continue;
+  for (const c of block.citations ?? []) {
+    if ("document_index" in c) console.log(c.cited_text, "→", sources[c.document_index].url);
+  }
+}
 ```
 
 ---
@@ -241,7 +251,7 @@ const res = await s.search("Section 43A IT Act data protection liability", {
 // Format for LLM-backed legal analysis with citations
 const docs = toDocuments(res.results);
 
-// Each doc.context = source URL for citation
+// Each doc.context = source URL (use citationSources() to map Claude's document_index → URL)
 // Each doc.source.data = extracted relevant passage
 // Pass to any LLM for legal reasoning with cited sources
 console.log(`Found ${docs.length} cited sources for legal analysis`);
@@ -267,18 +277,19 @@ const msg = await anthropic.messages.create({
 console.log(msg.content);
 ```
 
-**Built-in `india-legal` preset covers:**
+**Built-in `india-legal` preset (25 domains) includes:**
 
 | Domain | Authority |
 |---|---|
 | `indiacode.nic.in` | Ministry of Law & Justice — full statute text |
-| `main.sci.gov.in` | Supreme Court of India |
-| `sebi.gov.in` | Securities and Exchange Board of India |
-| `rbi.org.in` | Reserve Bank of India |
-| `mca.gov.in` | Ministry of Corporate Affairs |
-| `income-tax.india.gov.in` | Income Tax Department |
-| `cbic.gov.in` | Central Board of Indirect Taxes |
-| `legislative.gov.in` | Parliament of India — Bills & Acts |
+| `supremecourt.gov.in`, `main.sci.gov.in`, `sci.gov.in` | Supreme Court of India |
+| `legislative.gov.in`, `egazette.gov.in`, `doj.gov.in` | Bills, Acts, Gazette notifications |
+| `sebi.gov.in`, `rbi.org.in`, `irdai.gov.in`, `trai.gov.in`, `ibbi.gov.in` | Regulators |
+| `mca.gov.in`, `meity.gov.in`, `gst.gov.in`, `india.gov.in`, `ncbc.gov.in` | Ministries, commissions & portals |
+| `nclt.gov.in`, `nclat.nic.in`, `tdsat.gov.in` | Tribunals |
+| `indiankanoon.org`, `livelaw.in`, `barandbench.com`, `scconline.com`, `scobserver.in` | Case law & legal news |
+
+Run `DOMAIN_PRESETS["india-legal"]` (or `GET /presets`) for the authoritative list. With `scopedDomains`, **only** results from these domains are returned (see `scopeMode`).
 
 ---
 
@@ -500,16 +511,46 @@ for await (const chunk of result.textStream) {
 
 ---
 
+## Corporate proxies
+
+All outbound requests (engines, page fetches, SearXNG) honour the standard proxy environment variables. Nothing extra to install:
+
+```bash
+export HTTPS_PROXY=http://user:pass@proxy.corp:8080   # https targets (CONNECT tunnel, TLS end-to-end)
+export HTTP_PROXY=http://proxy.corp:8080              # http targets
+export NO_PROXY=localhost,127.0.0.1,.internal.corp,10.0.0.0/8
+npx search100x "DPDP rules 2025"
+```
+
+Or configure it in code or on the CLI:
+
+```typescript
+const s = new EnhancedSearch({ proxy: "http://proxy.corp:8080", noProxy: ["searxng.internal.corp"] });
+// proxy: false → ignore the environment and connect directly
+```
+
+```bash
+npx search100x "query" --proxy http://proxy.corp:8080
+npx search100x serve --no-proxy
+```
+
+- `NO_PROXY` supports `*`, `example.com` (plus subdomains), `.example.com`, `*.example.com`, `host:port`, IP literals and CIDR ranges.
+- Both `http://` and `https://` proxies are supported. Proxy credentials go in the URL and are sent as `Proxy-Authorization: Basic`. SOCKS proxies are not supported.
+- Proxy settings are process-wide.
+- If the proxy refuses a host, `res.engines[name].error` says so, e.g. `Proxy CONNECT to html.duckduckgo.com:443 failed: HTTP/1.1 403 Forbidden`.
+- SSRF protection still applies. Private IP literals and internal hostnames are rejected before anything reaches the proxy, and names that resolve locally to private addresses are blocked too. If the target can't be resolved locally (only the proxy has DNS), the proxy's own egress rules decide.
+- The headless-browser fallback is launched with `--proxy-server`. Chrome can't take credentials from the URL, so an authenticating proxy may reject the browser.
+
 ## SearXNG integration
 
-Connect your own SearXNG instance to route queries through ~70 additional sub-engines (Google, Bing, Brave, DuckDuckGo, Startpage, Qwant, Yahoo, and more) in a single parallel call. Results from SearXNG are merged with native engines using the same RRF + cascade scoring — sub-engines that agree on a result amplify its consensus bonus.
+SearXNG is **opt-in**: it is enabled only when you pass `searxng.baseUrl` or set `SEARXNG_URL` (with optional `SEARXNG_TOKEN`). Connect your own SearXNG instance to route queries through ~70 additional sub-engines (Google, Bing, Brave, DuckDuckGo, Startpage, Qwant, Yahoo, and more) in a single parallel call. Results from SearXNG are merged with native engines using the same RRF + cascade scoring — sub-engines that agree on a result amplify its consensus bonus.
 
 ```typescript
 import { EnhancedSearch } from "search100x";
 
 const s = new EnhancedSearch({
   searxng: {
-    baseUrl: "https://search100x.replit.app",
+    baseUrl: "https://searxng.example.com",   // your instance (localhost is allowed here)
     token:   process.env.SEARXNG_TOKEN,      // if your instance requires auth
     engines: "google,bing,brave,ddg",         // optional: restrict sub-engines
   },
@@ -629,9 +670,22 @@ for await (const batch of s.searchStream("SEC enforcement actions 2024", {
 `search100x` ships with a zero-dependency, ultra-lightweight HTTP server built on Node's native `node:http`. It runs on **~8.5MB heap (<25MB RAM)** and serves as a 100% free, self-hosted alternative to heavy SearXNG instances (which need Python, Redis, and ~300MB RAM).
 
 ```bash
-# Start micro-server (zero extra dependencies required)
+# Start micro-server (zero extra dependencies required) — listens on 127.0.0.1 by default
 npx search100x serve --port 3000
+
+# Expose on the network: always set an API key
+SEARCH100X_API_KEY=change-me npx search100x serve --host 0.0.0.0
+curl -H "Authorization: Bearer change-me" "http://server:3000/search?q=test"
 ```
+
+| Setting | Env var | Default |
+|---|---|---|
+| Bind address | `HOST` / `--host` | `127.0.0.1` |
+| API key (Bearer or `X-API-Key`; `/health` exempt) | `SEARCH100X_API_KEY` | none |
+| Rate limit per client IP | `SEARCH100X_RATE_LIMIT` | 60 req/min (`0` disables) |
+| Allow `browser=true` requests | `SEARCH100X_ALLOW_BROWSER=1` | off |
+
+Request parameters are clamped: `limit` 1–50, `enrich` 0–5, `/read` `maxChars` 100–20000 and `timeoutMs` 1000–15000.
 
 ### Endpoints & Integrations:
 
@@ -743,13 +797,16 @@ npx search100x --mcp
 | `newsRegion` | `string` | `"US"` | ISO 3166-1 alpha-2 country code |
 | `cache` | `IResultCache` | in-memory | Custom cache backend |
 | `searxng` | `SearXNGConfig` | — | SearXNG instance — adds ~70 sub-engines |
+| `proxy` | `string \| false` | env | HTTP(S) proxy, e.g. `http://user:pass@proxy.corp:8080`. Default: `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`. `false` disables (env ignored) |
+| `noProxy` | `string \| string[]` | `NO_PROXY` env | Hosts that bypass the proxy |
 
 **`SearXNGConfig`**
 
 | Option | Type | Description |
 |---|---|---|
-| `baseUrl` | `string` | SearXNG instance URL (e.g. `https://search100x.replit.app`) |
-| `token` | `string` | Bearer token if your instance requires auth |
+| `baseUrl` | `string` | **Required.** Your SearXNG instance URL. Without it (and without `SEARXNG_URL`), SearXNG is disabled |
+| `token` | `string` | Bearer token if your instance requires auth — sent only to `baseUrl` |
+| `fallbackUrls` | `string[]` | Extra instances tried if `baseUrl` fails (no token is sent to these) |
 | `engines` | `string` | Comma-separated sub-engines, e.g. `"google,bing,brave,ddg"` — blank = all |
 | `language` | `string` | BCP-47 language code, default `"en"` |
 | `timeRange` | `string` | `"day"` \| `"week"` \| `"month"` \| `"year"` |
@@ -758,13 +815,16 @@ npx search100x --mcp
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `limit` | `number` | `15` | Max results |
-| `scopedDomains` | `string[]` | — | Restrict to these domains |
+| `limit` | `number` | `15` | Max results (integer 1–100) |
+| `scopedDomains` | `string[]` | — | Domains (and subdomains) to search. All domains are queried via `site:` clauses in chunks of 6 (up to 30 domains) |
+| `scopeMode` | `"strict"\|"boost"` | `"strict"` | `strict`: return only results on `scopedDomains`. `boost`: also keep unscoped results |
 | `enrichTopN` | `number` | `0` | Replace snippet with best passage from top-N pages |
 | `enrichContent` | `number` | `0` | Populate `result.content` with all relevant passages |
 | `noCache` | `boolean` | `false` | Skip result cache |
 | `timeRange` | `"day"\|"week"\|"month"\|"year"` | — | Freshness filter |
 | `page` | `number` | `1` | Result page |
+
+Every response includes `engines` — a per-engine status map (`{ ok, ms, count, error?, skipped? }`) so you can see why a search came back empty — and `cached: true` when served from cache. The cache key covers the query and every option that changes the output.
 
 ### `toDocuments(results, options?)`
 
@@ -813,9 +873,15 @@ Returns a complete `messages.create()` payload for Anthropic — pass it with sp
 ```typescript
 await anthropic.messages.create({
   model: "claude-sonnet-4-6",
-  ...buildCitedQuery(results, question),
+  ...buildCitedQuery(results, question, { maxTokens: 2048 }),
 });
 ```
+
+Includes a `system` prompt telling the model that documents are untrusted web content (override with `system`, or `""` to omit). Document text is passed through unmodified so cited text stays clean.
+
+### `citationSources(results, options?)`
+
+Returns `{ documentIndex, title, url, resultIndex }[]` in the same order as `toDocuments()` (same options ⇒ same filtering). Use `sources[citation.document_index].url` to link each citation.
 
 ### `FileResultCache`
 
@@ -849,25 +915,24 @@ console.log(s.metrics());
 
 ## How scoring works
 
-1. **RRF (k=10)** — `score = Σ_engine  weight / (10 + rank)`. Calibrated for corpora of 60–100 results; k=60 is for TREC-scale 1000+ doc corpora and is too flat for web search.
-2. **Consensus bonus** — results appearing in multiple engines get `score × (1 + 0.08 × (appearances − 1))`.
-3. **Passage BM25** — when `enrichContent > 0`, fetched page text is split into overlapping 200-word windows. Windows above a BM25 threshold are selected using non-maximum suppression and joined in document order.
-4. **Min-max normalisation** — final scores scaled to `[0, 1]`.
+1. **Weighted RRF with adaptive k** — `score = Σ_engine weight / (k + rank)`, where `k = clamp(⌊0.29 × N⌋, 10, 150)` and N is the number of merged results.
+2. **Consensus bonus** — `× (1 + 0.15 × ln(distinct engines))`; SearXNG results get a further `× (1 + 0.12 × ln(sub-engines))` when several sub-engines agree.
+3. **Sigmoid normalisation** — RRF scores are mapped to `(0, 1)` with a sigmoid whose midpoint scales with the number of engines queried.
+4. **Cascade** — normalised RRF is blended with title/snippet BM25, domain authority and recency using the preset weights (table above). Legal/authority boosts can push a final score slightly above 1.
+5. **Passage BM25** — when `enrichContent > 0`, fetched page text is split into overlapping 200-word windows (500 in legal mode). Windows above a BM25 threshold are selected using non-maximum suppression and joined in document order.
 
-Engine weights reflect index quality:
+Engine weights reflect index quality (unknown/plugin engines default to 0.60):
 
 ```
-tavily / google = 1.0
-googlenews      = 0.85
-duckduckgo      = 0.80
-bing            = 0.75
-yep             = 0.70
-wikipedia       = 0.70
-mojeek          = 0.65
-marginalia      = 0.62
+searxng         = 1.30   indiankanoon = 1.20   indiacode / sebi = 1.10
+tavily / google = 1.00   brave        = 0.90   arxiv            = 0.90
+googlenews      = 0.85   startpage    = 0.85   duckduckgo       = 0.80
+wikipedia       = 0.80   hackernews   = 0.80   bing / bingnews  = 0.75
+github          = 0.75   yep          = 0.70   openalex         = 0.70
+mojeek          = 0.65   marginalia   = 0.62
 ```
 
-5. **Clustering & Reputation Filter**:
+6. **Clustering & Reputation Filter**:
    - **Domain Reputation Filter**: Matches domains against boost lists (authoritative sources) and checks titles and snippets for low-quality/spam regex patterns (deals, affiliate links, clickbait) to scale the authority score component.
    - **Result Clustering**: Groups results into subtopic clusters based on title Jaccard token similarity and selects the highest-scoring representative from each cluster first to ensure query coverage and diversity.
 

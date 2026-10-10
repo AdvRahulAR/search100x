@@ -73,8 +73,9 @@ export class ArXivEngine implements Engine {
       }
 
       return results;
-    } catch {
-      return [];
+    } catch (err) {
+      // Surface failures to the circuit breaker and SearchResponse.engines.
+      throw err;
     }
   }
 }

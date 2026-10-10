@@ -108,7 +108,7 @@ export interface LegalMetadata {
 }
 
 export interface SearXNGConfig {
-  /** Base URL of your SearXNG instance, e.g. "https://searx.example.com". Defaults to hardcoded instance. */
+  /** Base URL of your SearXNG instance, e.g. "https://searx.example.com". Required — SearXNG is disabled unless this (or SEARXNG_URL) is set. */
   baseUrl?:    string;
   /** Optional fallback SearXNG instances to query if primary instance fails or returns 0 results */
   fallbackUrls?: string[];
@@ -128,8 +128,14 @@ export interface SearchConfig {
   googleApiKey?: string;
   googleCx?: string;
   timeoutMs?: number;
-  /** HTTP/HTTPS proxy URL for all outbound requests */
-  proxy?: string;
+  /**
+   * HTTP/HTTPS proxy for all outbound requests, e.g. "http://user:pass@proxy.corp:8080".
+   * Default: HTTPS_PROXY / HTTP_PROXY / ALL_PROXY env vars. `false` disables
+   * proxying (env vars included). Proxy settings are process-wide.
+   */
+  proxy?: string | false;
+  /** Hosts that bypass the proxy (same syntax as NO_PROXY). Default: NO_PROXY env. */
+  noProxy?: string | string[];
   /** Custom domain authority overrides — merged with built-in domain scores */
   customDomainBoosts?: Record<string, number>;
   /**
@@ -205,6 +211,12 @@ export interface SearchOptions {
   rerankCandidates?: number;
   /** Enable multi-variant query fan-out for higher recall (default: false) */
   reformulate?: boolean;
+  /**
+   * How `scopedDomains` is applied. "strict" (default) returns ONLY results
+   * on those domains (and subdomains). "boost" also queries site:-restricted
+   * variants but keeps unscoped results.
+   */
+  scopeMode?: "strict" | "boost";
   /** Minimum results required before early return resolves (default: 5) */
   minResults?: number;
   /** Minimum number of successful responding engines required before early return (default: 3) */
@@ -228,12 +240,28 @@ export interface DomainCategoryInfo {
   allDomains: string[];
 }
 
+/** Per-engine outcome for one search — lets callers see why results are empty. */
+export interface EngineStatus {
+  /** Engine responded (possibly with 0 results) without error or timeout. */
+  ok: boolean;
+  ms: number;
+  count: number;
+  /** Error message or "timed out after Nms" when ok=false. */
+  error?: string;
+  /** Set when the engine was not called, e.g. "circuit-open". */
+  skipped?: string;
+}
+
 export interface SearchResponse {
   query: string;
   results: SearchResult[];
   count: number;
   sources: SourceName[];
   durationMs: number;
+  /** Per-engine status (absent on cache hits). */
+  engines?: Record<string, EngineStatus>;
+  /** True when served from cache. */
+  cached?: boolean;
 }
 
 export interface Logger {

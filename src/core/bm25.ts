@@ -168,16 +168,19 @@ export function tokenize(text: string): string[] {
     working = working.replace(globalPattern, " ");
   }
   const genericTokens = working
-    .replace(/[^\w\s]/g, " ")
+    // Unicode-aware: keep letters/marks/digits from every script (Hindi, Tamil…).
+    .replace(/[^\p{L}\p{M}\p{N}_\s]/gu, " ")
     .split(/\s+/)
     .filter((t) => t.length > 1 && !STOPWORDS.has(t))
-    .map(stemToken);
+    .map((t) => (/^[a-z0-9_]+$/.test(t) ? stemToken(t) : t));
   return [...compounds, ...genericTokens];
 }
 
 export function snippetRelevanceScore(snippet: string, queryTokens: string[]): number {
   if (queryTokens.length === 0) return 0.5;
-  const snippetTokens = snippet.toLowerCase().split(/\s+/);
+  // Same tokenizer as the query (stemming + compound terms), so terms can match.
+  const snippetTokens = tokenize(snippet);
+  if (snippetTokens.length === 0) return 0;
   const tf = new Map<string, number>();
   for (const t of snippetTokens) tf.set(t, (tf.get(t) ?? 0) + 1);
   let score = 0;

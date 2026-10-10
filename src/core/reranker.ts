@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 /**
  * Cross-encoder re-ranker (optional, opt-in via `rerank: true` in SearchOptions).
  *
@@ -26,7 +28,10 @@ let ort: any = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let session: any = null;
 
-const MODEL_PATH = new URL("../../models/cross-encoder.onnx", import.meta.url).pathname;
+// fileURLToPath (not URL.pathname) so Windows paths and spaces work.
+// Override the model directory with SEARCH100X_MODELS_DIR.
+const MODELS_DIR = process.env.SEARCH100X_MODELS_DIR ?? fileURLToPath(new URL("../../models/", import.meta.url));
+const MODEL_PATH = join(MODELS_DIR, "cross-encoder.onnx");
 const CE_ALPHA   = 0.60;  // cross-encoder weight in the final blend
 const MAX_SEQ    = 512;   // MiniLM context window (tokens)
 
@@ -39,7 +44,7 @@ let vocab: Map<string, number> | null = null;
 async function getVocab(): Promise<Map<string, number>> {
   if (vocab) return vocab;
   // vocab.json ships alongside the ONNX model in models/
-  const vocabPath = new URL("../../models/vocab.json", import.meta.url).pathname;
+  const vocabPath = join(MODELS_DIR, "vocab.json");
   const { readFileSync } = await import("fs");
   const raw  = JSON.parse(readFileSync(vocabPath, "utf-8")) as Record<string, number>;
   vocab = new Map(Object.entries(raw));

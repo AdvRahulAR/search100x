@@ -18,6 +18,8 @@ import os from "node:os";
 import path from "node:path";
 import { extractContent } from "./extractor.js";
 import { parse } from "node-html-parser";
+import { isSsrfSafe, assertResolvesPublic } from "./security.js";
+import { resolveProxy } from "./proxy.js";
 
 export interface BrowserOptions {
   /** Explicit user consent/permission to execute browser automation. Default: false */
@@ -168,6 +170,19 @@ export async function fetchWithBrowser(
     );
   }
 
+  // Same SSRF policy as plain HTTP fetches: never point the browser at
+  // internal addresses (including names that resolve to them).
+  const ssrf = isSsrfSafe(url);
+  if (!ssrf.allowed) throw new Error(`SSRF blocked: ${ssrf.reason}`);
+  try {
+    await assertResolvesPublic(new URL(url).hostname);
+  } catch (err) {
+    // Behind a proxy, local DNS may not resolve public names at all; only a
+    // positive private-address match is fatal then.
+    const isSsrf = err instanceof Error && err.message.startsWith("SSRF blocked");
+    if (isSsrf || !resolveProxy(new URL(url))) throw err;
+  }
+
   const startTime = Date.now();
   const timeoutMs = options.timeoutMs ?? 15000;
 
@@ -200,7 +215,15 @@ export async function fetchWithBrowser(
       cdpPort = 19000 + Math.floor(Math.random() * 1000);
       tempUserDataDir = options.userDataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "s100x-browser-"));
 
+      // Route the headless browser through the same proxy as HTTP requests.
+      const proxy = resolveProxy(new URL(url));
+      if (proxy?.authorization) {
+        console.warn("[search100x] Chrome cannot use proxy credentials from the URL; the browser fallback may be rejected by the proxy.");
+      }
+      const proxyArgs = proxy ? [`--proxy-server=${proxy.url.protocol}//${proxy.url.host}`] : [];
+
       const browserArgs = [
+        ...proxyArgs,
         options.headless !== false ? "--headless=new" : "--headless=new",
         `--remote-debugging-port=${cdpPort}`,
         `--user-data-dir=${tempUserDataDir}`,

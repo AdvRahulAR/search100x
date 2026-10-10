@@ -17,15 +17,63 @@
 
 import http, { IncomingMessage, ServerResponse } from "node:http";
 import { URL } from "node:url";
+import { timingSafeEqual } from "node:crypto";
 import { EnhancedSearch, DOMAIN_PRESETS, DOMAIN_CATEGORIES, resolvePresetDomains } from "./search.js";
 import { fetchRelevantContent, fetchPageContent } from "./core/fetcher.js";
 import { SourceName, SearchOptions, SearchResult, SearchConfig } from "./core/types.js";
 
 export interface MicroServerOptions {
   port?: number;
+  /** Bind address. Default "127.0.0.1" (local only). Use "0.0.0.0" to expose — and set apiKey. */
   host?: string;
   searchConfig?: SearchConfig;
   quiet?: boolean;
+  /**
+   * Require `Authorization: Bearer <apiKey>` (or `X-API-Key`) on every route
+   * except /health. Default: SEARCH100X_API_KEY env var; unset = no auth.
+   */
+  apiKey?: string;
+  /** Per-client-IP requests per minute. Default 60 (SEARCH100X_RATE_LIMIT env). 0 disables. */
+  rateLimitPerMinute?: number;
+  /**
+   * Allow clients to request headless-browser fetching (`browser=true`).
+   * Default false (SEARCH100X_ALLOW_BROWSER=1 env to enable) — otherwise any
+   * client could make the server launch Chrome.
+   */
+  allowBrowser?: boolean;
+}
+
+/** Parse an integer query param, falling back to `def` and clamping to [min, max]. */
+export function clampInt(raw: string | null, def: number, min: number, max: number): number {
+  if (raw == null || raw.trim() === "") return def;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return def;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+}
+
+/** Fixed-window per-key rate limiter with bounded memory. */
+class WindowRateLimiter {
+  private hits = new Map<string, { count: number; windowStart: number }>();
+  constructor(private readonly perMinute: number) {}
+  /** Returns seconds to wait, or 0 when allowed. */
+  check(key: string): number {
+    if (this.perMinute <= 0) return 0;
+    const now = Date.now();
+    const entry = this.hits.get(key);
+    if (!entry || now - entry.windowStart >= 60_000) {
+      if (this.hits.size > 10_000) this.hits.clear();
+      this.hits.set(key, { count: 1, windowStart: now });
+      return 0;
+    }
+    entry.count++;
+    if (entry.count > this.perMinute) return Math.ceil((entry.windowStart + 60_000 - now) / 1000);
+    return 0;
+  }
+}
+
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const ab = Buffer.from(a), bb = Buffer.from(b);
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
 export interface MicroServerInstance {
@@ -230,10 +278,38 @@ export function createMicroServer(options: MicroServerOptions = {}): {
     }
   );
 
+  const apiKey = options.apiKey ?? process.env.SEARCH100X_API_KEY ?? "";
+  const allowBrowser = options.allowBrowser ?? process.env.SEARCH100X_ALLOW_BROWSER === "1";
+  const limiter = new WindowRateLimiter(
+    options.rateLimitPerMinute ?? clampInt(process.env.SEARCH100X_RATE_LIMIT ?? null, 60, 0, 100_000)
+  );
+
   const server = http.createServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method === "OPTIONS") {
       handleCorsPreflight(res);
       return;
+    }
+
+    const isHealth = (req.url ?? "").split("?")[0] === "/health";
+
+    if (apiKey && !isHealth) {
+      const auth = req.headers["authorization"];
+      const bearer = typeof auth === "string" && auth.startsWith("Bearer ") ? auth.slice(7) : undefined;
+      const headerKey = req.headers["x-api-key"];
+      const provided = bearer ?? (typeof headerKey === "string" ? headerKey : undefined);
+      if (!provided || !timingSafeEqualStr(provided, apiKey)) {
+        sendJson(res, 401, { error: "Unauthorized" });
+        return;
+      }
+    }
+
+    if (!isHealth) {
+      const retryAfter = limiter.check(req.socket.remoteAddress ?? "unknown");
+      if (retryAfter > 0) {
+        res.setHeader("Retry-After", String(retryAfter));
+        sendJson(res, 429, { error: "Too many requests" });
+        return;
+      }
     }
 
     if (req.method !== "GET" && req.method !== "POST") {
@@ -259,7 +335,7 @@ export function createMicroServer(options: MicroServerOptions = {}): {
       sendJson(res, 200, {
         status: "ok",
         engine: "search100x-micro",
-        version: "4.3.0",
+        version: "5.0.0",
         uptimeSeconds: Math.round(process.uptime()),
         memory: {
           rssMb: +(mem.rss / (1024 * 1024)).toFixed(2),
@@ -295,15 +371,15 @@ export function createMicroServer(options: MicroServerOptions = {}): {
     if (pathname === "/read") {
       const targetUrl = qParams.get("url");
       const focusQuery = qParams.get("q") ?? qParams.get("query") ?? "";
-      const maxChars = Number(qParams.get("maxChars") ?? 3000);
-      const timeoutMs = Number(qParams.get("timeoutMs") ?? 6000);
+      const maxChars = clampInt(qParams.get("maxChars"), 3000, 100, 20_000);
+      const timeoutMs = clampInt(qParams.get("timeoutMs"), 6000, 1000, 15_000);
 
       if (!targetUrl) {
         sendJson(res, 400, { error: "Missing required query parameter: url" });
         return;
       }
 
-      const useBrowser = qParams.get("browser") === "true" || qParams.get("browser") === "1";
+      const useBrowser = allowBrowser && (qParams.get("browser") === "true" || qParams.get("browser") === "1");
       const browserOpts = useBrowser ? { enabled: true } : undefined;
 
       try {
@@ -350,7 +426,7 @@ export function createMicroServer(options: MicroServerOptions = {}): {
         // Return API help info
         sendJson(res, 200, {
           engine: "search100x-micro",
-          version: "4.3.0",
+          version: "5.0.0",
           endpoints: {
             "GET /search?q={query}": "Search multi-source consensus index",
             "GET /search?q={query}&format=json": "Drop-in SearXNG compatible search response",
@@ -369,8 +445,8 @@ export function createMicroServer(options: MicroServerOptions = {}): {
       }
 
       // Parse search options
-      const limit = Number(qParams.get("limit") ?? qParams.get("num") ?? 10);
-      const enrich = Number(qParams.get("enrich") ?? 0);
+      const limit = clampInt(qParams.get("limit") ?? qParams.get("num"), 10, 1, 50);
+      const enrich = clampInt(qParams.get("enrich"), 0, 0, 5);
       const stream = qParams.get("stream") === "true" || qParams.get("stream") === "1";
       const preset = qParams.get("preset");
       const scope = qParams.get("scope");
@@ -416,9 +492,9 @@ export function createMicroServer(options: MicroServerOptions = {}): {
 
       const sources = sourcesParam ? (sourcesParam.split(",").map((s) => s.trim()) as SourceName[]) : undefined;
       const browserParam = qParams.get("browser");
-      const useBrowser = browserParam === "true" || browserParam === "1";
+      const useBrowser = allowBrowser && (browserParam === "true" || browserParam === "1");
       const searchOptions: SearchOptions = {
-        limit: Math.min(Math.max(1, limit), 50),
+        limit,
         sources,
         scopedDomains,
         enrichTopN: enrich,
@@ -487,7 +563,7 @@ export function createMicroServer(options: MicroServerOptions = {}): {
 /** Starts the micro-server on the configured port/host */
 export async function startMicroServer(options: MicroServerOptions = {}): Promise<MicroServerInstance> {
   const port = options.port ?? Number(process.env.PORT ?? 3000);
-  const host = options.host ?? process.env.HOST ?? "0.0.0.0";
+  const host = options.host ?? process.env.HOST ?? "127.0.0.1";
   const { server, search } = createMicroServer(options);
 
   return new Promise((resolve, reject) => {
@@ -495,13 +571,18 @@ export async function startMicroServer(options: MicroServerOptions = {}): Promis
     server.listen(port, host, () => {
       server.removeListener("error", reject);
 
+      if (!options.quiet && host !== "127.0.0.1" && host !== "localhost" && host !== "::1"
+          && !(options.apiKey ?? process.env.SEARCH100X_API_KEY)) {
+        console.warn(`[search100x] WARNING: listening on ${host} without an API key. Set SEARCH100X_API_KEY to require auth.`);
+      }
+
       if (!options.quiet) {
         const mem = process.memoryUsage();
         const rssMb = (mem.rss / (1024 * 1024)).toFixed(1);
         const heapMb = (mem.heapUsed / (1024 * 1024)).toFixed(1);
 
         console.log(`\n┌─────────────────────────────────────────────────────────────┐`);
-        console.log(`│ search100x Micro-Server (v4.3.0)                             │`);
+        console.log(`│ search100x Micro-Server (v5.0.0)                             │`);
         console.log(`│ Free Metasearch & SearXNG Drop-in Engine                    │`);
         console.log(`├─────────────────────────────────────────────────────────────┤`);
         console.log(`│ Web UI:       http://${host === "0.0.0.0" ? "localhost" : host}:${port}/                     │`);

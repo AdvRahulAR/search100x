@@ -8,7 +8,8 @@
 import { startMicroServer } from "./micro-server.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
-const HOST = process.env.HOST ?? "0.0.0.0";
+// Local-only by default. Set HOST=0.0.0.0 (and SEARCH100X_API_KEY) to expose.
+const HOST = process.env.HOST ?? "127.0.0.1";
 
 startMicroServer({
   port: PORT,

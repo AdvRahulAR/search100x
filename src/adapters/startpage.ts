@@ -34,8 +34,9 @@ export class StartpageEngine implements Engine {
 
       if (typeof res.data !== "string") return [];
       return this.parseHtml(res.data);
-    } catch {
-      return [];
+    } catch (err) {
+      // Surface failures to the circuit breaker and SearchResponse.engines.
+      throw err;
     }
   }
 

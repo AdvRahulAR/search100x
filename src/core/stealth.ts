@@ -97,6 +97,11 @@ const pinnedProfiles = new Map<string, BrowserProfile>();
 
 export function getPinnedProfile(key: string): BrowserProfile {
   if (!pinnedProfiles.has(key)) {
+    // Bound memory: keys are per-query, so evict oldest beyond 1000 entries.
+    if (pinnedProfiles.size >= 1000) {
+      const oldest = pinnedProfiles.keys().next().value;
+      if (oldest !== undefined) pinnedProfiles.delete(oldest);
+    }
     pinnedProfiles.set(key, getProfile());
   }
   return pinnedProfiles.get(key)!;

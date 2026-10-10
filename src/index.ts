@@ -1,4 +1,4 @@
-export { EnhancedSearch, ResultCache, FileResultCache, DOMAIN_PRESETS, DOMAIN_CATEGORIES, getCategoryDomains, listDomainCategories, listDomainPresets, resolvePresetDomains } from "./search.js";
+export { EnhancedSearch, urlInScope, ResultCache, FileResultCache, DOMAIN_PRESETS, DOMAIN_CATEGORIES, getCategoryDomains, listDomainCategories, listDomainPresets, resolvePresetDomains } from "./search.js";
 export { cacheKey } from "./core/cache.js";
 export { SqliteResultCache } from "./core/sqlite-cache.js";
 export type { IResultCache } from "./core/cache.js";
@@ -15,7 +15,9 @@ export type {
   ResultType,
   DomainCategory,
   DomainCategoryInfo,
+  EngineStatus,
 } from "./core/types.js";
+export type { Engine } from "./core/engine.js";
 export { ENGINE_WEIGHTS, K, rrfScore, normaliseScores, urlAuthorityScore, recencyScore, cascadeScore, DEFAULT_WEIGHTS, NEWS_WEIGHTS, LEGAL_WEIGHTS, ACADEMIC_WEIGHTS, TECH_WEIGHTS, BUSINESS_WEIGHTS, SCORING_PRESETS } from "./core/scorer.js";
 export type { CascadeWeights } from "./core/scorer.js";
 export { normalizeUrl, urlKey } from "./core/normalizer.js";
@@ -25,8 +27,8 @@ export type { SearXNGConfig } from "./core/types.js";
 export { rerankResults } from "./core/reranker.js";
 export { ENGINE_TIMEOUTS } from "./core/engine.js";
 export { fetchPageContent, fetchBestPassage, enrichSnippets, fetchRelevantContent, enrichContents, enrichContentsLegal } from "./core/fetcher.js";
-export { toDocuments, buildCitedQuery, toPromptContext } from "./core/documents.js";
-export type { CitationDocument, ToDocumentsOptions, PromptContextOptions } from "./core/documents.js";
+export { toDocuments, buildCitedQuery, toPromptContext, citationSources, UNTRUSTED_CONTENT_SYSTEM_PROMPT } from "./core/documents.js";
+export type { CitationDocument, ToDocumentsOptions, PromptContextOptions, CitationSource, CitedQueryOptions } from "./core/documents.js";
 export { CircuitBreakerRegistry } from "./core/circuit.js";
 export type { QueryBundle } from "./core/transformer.js";
 export { MarginaliaEngine } from "./adapters/marginalia.js";
@@ -65,6 +67,11 @@ export {
   isSsrfSafe, isRedirectSafe, detectPromptInjection, BloomFilter, lostInTheMiddleRerank,
 } from "./core/security.js";
 export type { SsrfCheckResult, InjectionCheckResult } from "./core/security.js";
+export { isPrivateAddress, assertResolvesPublic } from "./core/security.js";
+export { safeFetch, SsrfError } from "./core/safe-fetch.js";
+export { configureProxy, getProxySettings, resolveProxy, matchesNoProxy } from "./core/proxy.js";
+export type { ProxySettings, ResolvedProxy } from "./core/proxy.js";
+export type { SafeFetchOptions, SafeResponse } from "./core/safe-fetch.js";
 
 // v3.1.0 exports — provenance, classification, tiers
 export { classifySourceType, addProvenance } from "./core/fetcher.js";
